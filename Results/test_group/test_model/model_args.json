@@ -1,0 +1,5 @@
+{
+  "model_func": "combonet",
+  "model_group": "test_group",
+  "model_name": "test_model"
+}

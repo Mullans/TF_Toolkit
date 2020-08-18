@@ -1,0 +1,5 @@
+{
+  "model_func": "combonet-label",
+  "model_group": "test_group",
+  "model_name": "test_model2"
+}
