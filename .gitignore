@@ -1,0 +1,7 @@
+__pycache__
+*.pyc
+events.out*
+*.png
+ignore_*
+
+.ipynb_checkpoints
