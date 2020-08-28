@@ -37,7 +37,8 @@ def tversky_loss(beta=0.5, **kwargs):
     def loss(y_true, y_pred):
         numerator = tf.reduce_sum(y_true * y_pred, axis=-1)
         denominator = y_true * y_pred + beta * (1 - y_true) * y_pred + (1 - beta) * y_true * (1 - y_pred)
-        return 1 - (numerator + 1) / (tf.reduce_sum(denominator, axis=-1) + 1)
+        result = 1 - (numerator + 1) / (tf.reduce_sum(denominator, axis=-1) + 1)
+        return tf.reduce_mean(result)
     return tf.function(loss)
 
 
@@ -47,15 +48,15 @@ def mixed_IOU_BCE_loss(beta=0.5, label_smoothing=0.1, reduction='auto', **kwargs
 
     def loss(y_true, y_pred):
         y_true = tf.cast(y_true, y_pred.dtype)
-        loss_a = iou(y_true, y_pred)
-        loss_b = bce(y_true, y_pred)
-        return loss_a * beta + loss_b * (1 - beta)
+        iou_loss = iou(y_true, y_pred)
+        bce_loss = bce(y_true, y_pred)
+        return iou_loss * beta + bce_loss * (1 - beta)
 
     return tf.function(loss)
 
 
 def focal_loss(beta=0.25, gamma=2, **kwargs):
-    """https://arxiv.org/abs/1708.02002 - code from https://lars76.github.io/neural-networks/object-detection/losses-for-segmentation/"""
+    """https://arxiv.org/abs/1708.02002 - code adapted from https://lars76.github.io/neural-networks/object-detection/losses-for-segmentation/"""
     def focal_loss_with_logits(logits, targets, beta, gamma, y_pred):
         weight_a = beta * (1 - y_pred) ** gamma * targets
         weight_b = (1 - beta) * y_pred ** gamma * (1 - targets)
