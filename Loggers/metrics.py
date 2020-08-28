@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 
-def get_metric(metric_name):
+def get_metric(metric_name, name=None):
     metric_lookup = {
         'loss': [tf.keras.metrics.Mean, 'Loss: {:.4f}'],
         'accuracy': [tf.keras.metrics.BinaryAccuracy, 'Accuracy: {:6.2f}%'],
@@ -14,14 +14,17 @@ def get_metric(metric_name):
     }
     if metric_name not in metric_lookup:
         raise NotImplementedError("A wrapper for that metric type has not been added yet")
-    return metric_lookup[metric_name]
+    func, pat = metric_lookup[metric_name]
+    if name is not None:
+        pat = name + pat
+    return func, pat
 
 
 class MetricWrapper(object):
-    def __init__(self, metric_name, relevant_idx, metric_type='train'):
+    def __init__(self, metric_name, relevant_idx, name=None, metric_type='train'):
         self.metric = None
-        self.metric_func, log_pattern = get_metric(metric_name)
-        self.metric_name = metric_name
+        self.metric_func, log_pattern = get_metric(metric_name, name)
+        self.metric_name = metric_name if name is None else name
         if isinstance(relevant_idx, int):
             relevant_idx = [relevant_idx]
         self.relevant_idx = relevant_idx

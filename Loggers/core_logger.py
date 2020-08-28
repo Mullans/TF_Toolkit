@@ -37,13 +37,13 @@ class CoreLoggingHandler(object):
         log_string = prefix + " " + ' || '.join([train_string, val_string])
         return log_string
 
-    def add_metric(self, metric, relevant_idx, in_training=True, in_validation=True):
+    def add_metric(self, metric, relevant_idx, name=None, in_training=True, in_validation=True):
         if not in_training and not in_validation:
             raise ValueError("Metrics must be in either training or validation")
         if in_training:
-            self.train_metrics.append(MetricWrapper(metric, relevant_idx))
+            self.train_metrics.append(MetricWrapper(metric, relevant_idx, name=name))
         if in_validation:
-            self.val_metrics.append(MetricWrapper(metric, relevant_idx, metric_type='val'))
+            self.val_metrics.append(MetricWrapper(metric, relevant_idx, name=name, metric_type='val'))
 
     def start(self, logdir, total_epochs=None):
         self.epochs = total_epochs

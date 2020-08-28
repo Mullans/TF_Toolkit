@@ -1,7 +1,31 @@
 import gouda
+import logging
 import numpy as np
 import tensorflow as tf
 AUTOTUNE = tf.data.experimental.AUTOTUNE
+
+
+def set_tf_loglevel(level):
+    if isinstance(level, stf):
+        level_dict = {
+            'fatal': 3,
+            'error': 2,
+            'warning': 1,
+            'info': 0
+        }
+        if level.lower() in level_dict:
+            level = level_dict[level]
+        else:
+            raise ValueError('Unknown logging level: "{}"'.format(level))
+    if level >= logging.FATAL:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+    elif level >= logging.ERROR:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    elif level >= logging.WARNING:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+    else:
+        os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+    logging.getLogger('tensorflow').setLevel(level)
 
 
 def register_goudapath_tensor():
