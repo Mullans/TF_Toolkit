@@ -41,23 +41,24 @@ def tversky_loss(beta=0.5, **kwargs):
     return tf.function(loss)
 
 
-def mixed_IOU_BCE_loss(alpha=0.5, label_smoothing=0.1, reduction='auto', **kwargs):
+def mixed_IOU_BCE_loss(beta=0.5, label_smoothing=0.1, reduction='auto', **kwargs):
     bce = tf.keras.losses.BinaryCrossentropy(from_logits=False, label_smoothing=label_smoothing, reduction=reduction)
     iou = IOU_loss()
 
     def loss(y_true, y_pred):
+        y_true = tf.cast(y_true, y_pred.dtype)
         loss_a = iou(y_true, y_pred)
         loss_b = bce(y_true, y_pred)
-        return loss_a * alpha + loss_b * (1 - alpha)
+        return loss_a * beta + loss_b * (1 - beta)
 
     return tf.function(loss)
 
 
-def focal_loss(alpha=0.25, gamma=2, **kwargs):
+def focal_loss(beta=0.25, gamma=2, **kwargs):
     """https://arxiv.org/abs/1708.02002 - code from https://lars76.github.io/neural-networks/object-detection/losses-for-segmentation/"""
-    def focal_loss_with_logits(logits, targets, alpha, gamma, y_pred):
-        weight_a = alpha * (1 - y_pred) ** gamma * targets
-        weight_b = (1 - alpha) * y_pred ** gamma * (1 - targets)
+    def focal_loss_with_logits(logits, targets, beta, gamma, y_pred):
+        weight_a = beta * (1 - y_pred) ** gamma * targets
+        weight_b = (1 - beta) * y_pred ** gamma * (1 - targets)
 
         return (tf.math.log1p(tf.exp(-tf.abs(logits))) + tf.nn.relu(-logits)) * (weight_a + weight_b) + logits * weight_b
 
@@ -65,7 +66,7 @@ def focal_loss(alpha=0.25, gamma=2, **kwargs):
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1 - tf.keras.backend.epsilon())
         logits = tf.math.log(y_pred / (1 - y_pred))
 
-        loss = focal_loss_with_logits(logits=logits, targets=y_true, alpha=alpha, gamma=gamma, y_pred=y_pred)
+        loss = focal_loss_with_logits(logits=logits, targets=y_true, beta=beta, gamma=gamma, y_pred=y_pred)
 
         return tf.reduce_mean(loss)
 
@@ -98,7 +99,7 @@ def get_loss_func(loss_type, **kwargs):
     -------------------
     label_smoothing : float
         [0, 1] value to shift labels away from 0 or 1 - currntly only in bce or iou_bce
-    alpha : float
+    beta : float
         [0, 1] value for IOU weight in iou_bce or background weight in focal
     gamma : float
         exponent term for focal loss - focal loss with gamma=0 is the same as bce

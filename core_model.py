@@ -20,57 +20,58 @@ from .losses import get_loss_func
 from .model_arch import get_model_func
 from .learning_rates import get_lr_func
 from .stable_counter import StableCounter
+from .train_functions import get_update_step
 
 # assumes this is in a child directory (usually ./scripts) of the main project
 # PROJECT_DIR = os.path.realpath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
 
-
-def train_step_func(model, optimizer, loss_func, logging_handler):
-    def train_step(inputs):
-        x, y = inputs
-        with tf.GradientTape() as tape:
-            predictions = model(x, training=True)
-            loss = loss_func(y, predictions)
-        grad = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grad, model.trainable_variables))
-        logging_handler.train_step((y, predictions, loss))
-        return loss
-    return tf.function(train_step)
-
-
-def val_step_func(model, loss_func, logging_handler):
-    def val_step(inputs):
-        x, y = inputs
-        predictions = model(x, training=False)
-        loss = loss_func(y, predictions)
-        logging_handler.val_step((y, predictions, loss))
-        return loss
-    return tf.function(val_step)
-
-
-def distributed_train_step_func(model, optimizer, loss_func, logging_handler, batch_size=32):
-    """Default distributed train step for single input, single output, single loss models"""
-    def train_step(inputs):
-        x, y = inputs
-        with tf.GradientTape() as tape:
-            predictions = model(x, training=True)
-            loss = loss_func(y, predictions)
-        grad = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grad, model.trainable_variables))
-        logging_handler.train_step((y, predictions, loss / batch_size))
-        return loss
-    return tf.function(train_step)
-
-
-def distributed_val_step_func(model, loss_func, logging_handler, batch_size=32):
-    """Default distributed validation step for single input, single output, single loss models"""
-    def val_step(inputs):
-        x, y = inputs
-        predictions = model(x, training=False)
-        loss = loss_func(y, predictions)
-        logging_handler.val_step((y, predictions, loss / batch_size))
-        return loss
-    return tf.function(val_step)
+#
+# def train_step_func(model, optimizer, loss_func, logging_handler):
+#     def train_step(inputs):
+#         x, y = inputs
+#         with tf.GradientTape() as tape:
+#             predictions = model(x, training=True)
+#             loss = loss_func(y, predictions)
+#         grad = tape.gradient(loss, model.trainable_variables)
+#         optimizer.apply_gradients(zip(grad, model.trainable_variables))
+#         logging_handler.train_step((y, predictions, loss))
+#         return loss
+#     return tf.function(train_step)
+#
+#
+# def val_step_func(model, loss_func, logging_handler):
+#     def val_step(inputs):
+#         x, y = inputs
+#         predictions = model(x, training=False)
+#         loss = loss_func(y, predictions)
+#         logging_handler.val_step((y, predictions, loss))
+#         return loss
+#     return tf.function(val_step)
+#
+#
+# def distributed_train_step_func(model, optimizer, loss_func, logging_handler, batch_size=32):
+#     """Default distributed train step for single input, single output, single loss models"""
+#     def train_step(inputs):
+#         x, y = inputs
+#         with tf.GradientTape() as tape:
+#             predictions = model(x, training=True)
+#             loss = loss_func(y, predictions)
+#         grad = tape.gradient(loss, model.trainable_variables)
+#         optimizer.apply_gradients(zip(grad, model.trainable_variables))
+#         logging_handler.train_step((y, predictions, loss / batch_size))
+#         return loss
+#     return tf.function(train_step)
+#
+#
+# def distributed_val_step_func(model, loss_func, logging_handler, batch_size=32):
+#     """Default distributed validation step for single input, single output, single loss models"""
+#     def val_step(inputs):
+#         x, y = inputs
+#         predictions = model(x, training=False)
+#         loss = loss_func(y, predictions)
+#         logging_handler.val_step((y, predictions, loss / batch_size))
+#         return loss
+#     return tf.function(val_step)
 
 
 class CoreModel(object):
@@ -79,10 +80,6 @@ class CoreModel(object):
                  model_name='default',
                  project_dir=None,
                  load_args=False,
-                 use_multiple_gpus=True,
-                 model_lookup_func=get_model_func,
-                 loss_lookup_func=get_loss_func,
-                 learning_rate_lookup_func=get_lr_func,
                  distributed=False,
                  **kwargs):
         if project_dir is None:
@@ -91,28 +88,21 @@ class CoreModel(object):
         K.clear_session()
         self.model_args = {
             'model_name': model_name,
-            'model_group': model_group
+            'model_group': model_group,
+            'train_step': 'default',
+            'val_step': 'default',
+            'loss_type': None,
+            'lr_type': 'base'
         }
         for key in kwargs:
             self.model_args[key] = kwargs[key]
-        self.model_lookup = model_lookup_func
-        self.loss_lookup = loss_lookup_func
-        self.lr_lookup = learning_rate_lookup_func
-        self.model = None
-        if 'train_step' not in self.model_args:
-            if distributed:
-                self.train_step = distributed_train_step_func
-            else:
-                self.train_step = train_step_func
-        if 'val_step' not in self.model_args:
-            if distributed:
-                self.val_step = distributed_val_step_func
-            else:
-                self.val_step = val_step_func
 
-        results_dir = gouda.GoudaPath(os.path.join(project_dir, 'Results'))
-        gouda.ensure_dir(results_dir)
-        group_dir = results_dir / model_group
+        self.is_distributed = distributed
+        self.model = None
+
+        self.results_dir = gouda.GoudaPath(os.path.join(project_dir, 'Results'))
+        gouda.ensure_dir(self.results_dir)
+        group_dir = self.results_dir / model_group
         gouda.ensure_dir(group_dir)
         self.model_dir = group_dir / model_name
         gouda.ensure_dir(self.model_dir)
@@ -125,10 +115,14 @@ class CoreModel(object):
             else:
                 raise ValueError('No file found at {}'.format(args_path.abspath))
         if not args_path.exists():
-            gouda.save_json(self.model_args, args_path.abspath)
+            self.save_args()
 
     def save_args(self):
-        gouda.save_json(self.model_args, self.model_dir / 'model_args.json')
+        save_args = self.model_args.copy()
+        for key in save_args:
+            if 'function' in str(type(save_args[key])):
+                save_args['key'] = 'custom'
+        gouda.save_json(save_args, self.model_dir / 'model_args.json')
 
     def clear(self):
         K.clear_session()
@@ -142,19 +136,41 @@ class CoreModel(object):
         if model_func is None:
             model_func = self.model_args['model_func']
         if isinstance(model_func, str):
-            if self.model_lookup is None:
-                raise ValueError("Please set the model lookup function")
-            model_func = self.model_lookup(model_func)
+            model_func = get_model_func(model_func)
 
         self.model = model_func(**self.model_args)
 
-    def load_weights(self, version=None, path=None):
+    def load_weights(self, group_name=None, model_name=None, version=None, path=None):
+        """Load weights from an existing trained model.
+
+        Paramters
+        ---------
+        group_name : None | str
+            The name of the model group to load from (the default is None)
+        model_name : None | str
+            The name of the model to load from (the default is None)
+        version : None | str
+            The name of the model version to load weights from (the default is None)
+        path : None | str
+            The full path to the model weights to load. Path takes priority over
+            version if both are present.
+
+        Note
+        ----
+        Either version or path must be set to load weights. If either group_name
+        or model_name are None, then model weights from the same group/name will
+        be used.
+        """
+        # TODO Add a search through training weights (set desired epoch)
         if self.model is None:
             self.compile_model()
         if path is None and version is None:
             raise ValueError('Either version or path must be specified to load weights')
         if path is None:
-            path = self.model_dir / version / 'model_weights'
+            if group_name is None or model_name is None:
+                path = self.model_dir / version / 'model_weights'
+            else:
+                path = self.results_dir / group_name / model_name / version / 'model_weights'
             found_tf = os.path.exists(path + '.tf.index')
             found_h5 = os.path.exists(path + '.h5')
             if found_tf and found_h5:
@@ -169,11 +185,49 @@ class CoreModel(object):
             path = path.abspath
         self.model.load_weights(path)
 
-    def set_train_step(self, train_func):
-        self.train_step = tf.funtion(train_func)
+    @property
+    def lr_type(self):
+        if isinstance(self.model_args['lr_type'], str):
+            return self.model_args['lr_type']
+        else:
+            return 'custom'
 
-    def set_val_step(self, val_func):
-        self.val_step = tf.function(val_func)
+    @lr_type.setter
+    def lr_type(self, lr_type):
+        self.model_args['lr_type'] = lr_type
+
+    @property
+    def loss_type(self):
+        if isinstance(self.model_args['loss_type'], str):
+            return self.model_args['loss_type']
+        else:
+            return 'custom'
+
+    @loss_type.setter
+    def loss_type(self, loss_type):
+        self.model_args['loss_type'] = loss_type
+
+    @property
+    def train_step(self):
+        if isinstance(self.model_args['train_step'], str):
+            return self.model_args['train_step']
+        else:
+            return 'custom'
+
+    @train_step.setter
+    def train_step(self, train_step):
+        self.model_args['train_step'] = train_step
+
+    @property
+    def val_step(self):
+        if isinstance(self.model_args['val_step'], str):
+            return self.model_args['val_step']
+        else:
+            return 'custom'
+
+    @val_step.setter
+    def val_step(self, val_step):
+        self.model_args['val_step'] = val_step
 
     def plot_model(self):
         if self.model is None:
@@ -214,17 +268,63 @@ class CoreModel(object):
         if starting_epoch == 1:
             self.model.save_weights(weights_dir('model_weights_init.tf').abspath)
 
-        if self.lr_lookup is None:
-            raise ValueError("Please set the learning rate lookup function")
-        lr = self.lr_lookup(train_args['lr_type'])(**train_args)
+        # Set learning rate type
+        if train_args['lr_type'] is None:
+            if self.model_args['lr_type'] is None:
+                train_args['lr_type'] = 'base'
+            else:
+                train_args['lr_type'] = self.model_args['lr_type']
+        if isinstance(train_args['lr_type'], str):
+            lr = get_lr_func(train_args['lr_type'])(**train_args)
+        else:
+            lr = train_args['lr_type']
+            train_args['lr_type'] = custom
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
-        if self.loss_lookup is None:
-            raise ValueError("Please set the loss lookup function")
-        loss = self.loss_lookup(train_args['loss_type'])(**train_args)
+        # Set loss type
+        if train_args['loss_type'] is None:
+            if self.model_args['loss_type'] is None:
+                raise ValueError("No loss function defined")
+            train_args['loss_type'] = self.model_args['loss_type']
+        if isinstance(train_args['loss_type'], 'str'):
+            loss = get_loss_func(train_args['loss_type'])(**train_args)
+        else:
+            loss = train_args['loss_type']
+            train_args['loss_type'] = 'custom'
 
+        # Set training step
+        if train_args['train_step'] is None:
+            if self.model_args['train_step'] is None:
+                train_args['train_step'] = 'default'
+            else:
+                train_args['train_step'] = self.model_args['train_step']
+        if is_instance(train_args['train_step'], str):
+            train_step = get_update_step(train_args['train_step'], is_training=True)
+        else:
+            train_step = train_args['train_step']
+            train_args['train_step'] = 'custom'
+
+        # Set validation step
+        if train_args['val_step'] is None:
+            if self.model_args['val_step'] is None:
+                train_args['val_step'] = 'default'
+            else:
+                train_args['val_step'] = self.model_args['val_step']
+        if isinstance(train_args['val_step']):
+            val_step = get_update_step(train_args['val_step'], is_training=False)
+        else:
+            val_step = train_args['val_step']
+            train_args['val_step'] = 'custom'
+
+        # Save training args as json
+        save_args = train_args.copy()
+        for key in save_args:
+            if 'function' in str(type(save_args[key])):
+                save_args['key'] = 'custom'
+        gouda.save_json(train_args, args_path)
+
+        # Start loggers
         logging_handler.start(log_dir, total_epochs=epochs)
-
         train_counter = StableCounter()
         if 'train_steps' in train_args:
             train_counter.set(train_args['train_steps'])
@@ -232,8 +332,8 @@ class CoreModel(object):
         if 'val_steps' in train_args:
             val_counter.set(train_args['val_steps'])
 
-        train_step = self.train_step(self.model, optimizer, loss, logging_handler)
-        val_step = self.val_step(self.model, loss, logging_handler)
+        train_step = train_step(self.model, optimizer, loss, logging_handler)
+        val_step = val_step(self.model, loss, logging_handler)
 
         epoch_pbar = tqdm.tqdm(total=epochs, unit=' epochs', initial=starting_epoch - 1)
         val_pbar = tqdm.tqdm(total=val_counter(), unit=' val samples', leave=False)
@@ -319,18 +419,14 @@ class CoreModel(object):
         for item in val_data.take(1):
             train_args['val_batch_size'] = item[0].numpy().shape[0]
 
-        if self.lr_lookup is None:
-            raise ValueError("Please set the learning rate lookup function")
-        lr = self.lr_lookup(train_args['lr_type'])(**train_args)
+        lr = get_lr_func(train_args['lr_type'])(**train_args)
 
         strategy = tf.distribute.MirroredStrategy()
         with strategy.scope():
             self.compile_model()
             optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
             logging_handler.start(log_dir, total_epochs=epochs)
-            if self.loss_lookup is None:
-                raise ValueError("Please set the loss lookup function")
-            # loss = self.loss_lookup(train_args['loss_type'])(reduction='none', **train_args)
+            # loss = get_loss_func(train_args['loss_type'])(reduction='none', **train_args)
             # loss_object = tf.keras.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
 
             # def distributed_loss(y_true, y_pred):
@@ -342,7 +438,7 @@ class CoreModel(object):
             loss_object = tf.keras.losses.BinaryCrossentropy(
                 from_logits=True,
                 reduction='none')
-            
+
             def distributed_loss(labels, predictions):
                 per_example_loss = loss_object(labels, predictions)
                 return tf.nn.compute_average_loss(per_example_loss, global_batch_size=32)
