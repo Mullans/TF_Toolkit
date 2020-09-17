@@ -229,6 +229,21 @@ class CoreModel(object):
     def val_step(self, val_step):
         self.model_args['val_step'] = val_step
 
+    def summary(self, **kwargs):
+        return self.model.summary(**kwargs)
+
+    def num_parameters(self):
+        total = 0
+        for var in self.model.variables:
+            total += tf.size(var)
+        return total
+
+    def num_trainable_paramters(self):
+        total = 0
+        for var in self.model.trainable_variables:
+            total += tf.size(var)
+        return total
+
     def plot_model(self):
         if self.model is None:
             raise ValueError("Compile the model before plotting")
@@ -286,31 +301,23 @@ class CoreModel(object):
             if self.model_args['loss_type'] is None:
                 raise ValueError("No loss function defined")
             train_args['loss_type'] = self.model_args['loss_type']
-        if isinstance(train_args['loss_type'], 'str'):
+        if isinstance(train_args['loss_type'], str):
             loss = get_loss_func(train_args['loss_type'])(**train_args)
         else:
             loss = train_args['loss_type']
             train_args['loss_type'] = 'custom'
 
         # Set training step
-        if train_args['train_step'] is None:
-            if self.model_args['train_step'] is None:
-                train_args['train_step'] = 'default'
-            else:
-                train_args['train_step'] = self.model_args['train_step']
-        if is_instance(train_args['train_step'], str):
+        train_args['train_step'] = self.model_args['train_step']
+        if isinstance(train_args['train_step'], str):
             train_step = get_update_step(train_args['train_step'], is_training=True)
         else:
             train_step = train_args['train_step']
             train_args['train_step'] = 'custom'
 
         # Set validation step
-        if train_args['val_step'] is None:
-            if self.model_args['val_step'] is None:
-                train_args['val_step'] = 'default'
-            else:
-                train_args['val_step'] = self.model_args['val_step']
-        if isinstance(train_args['val_step']):
+        train_args['val_step'] = self.model_args['val_step']
+        if isinstance(train_args['val_step'], str):
             val_step = get_update_step(train_args['val_step'], is_training=False)
         else:
             val_step = train_args['val_step']
