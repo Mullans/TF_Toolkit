@@ -63,7 +63,7 @@ class Occlusion(object):
         images = np.stack(images, axis=0)
         return images, locations
 
-    def get_mask(self, x_value, num_patches=10, overlap=0.5, background_value=0, batch_size=32):
+    def get_mask(self, x_value, num_patches=10, overlap=0.5, class_of_interest=0, background_value=0, batch_size=32):
         """Get occlusion-based heatmap of input influence on prediction
 
         Parameters
@@ -83,12 +83,12 @@ class Occlusion(object):
         """
         x_value = self.__enforce_shape(x_value)
         images, locations = self.__occlude2D(x_value[0], num_patches=num_patches, overlap=overlap, background_value=background_value)
-        baseline = self.model(x_value)
+        baseline = self.model(x_value)[:, class_of_interest]
         batches = [images[i:i + batch_size] for i in range(0, images.shape[0], batch_size)]
-        results = np.concatenate([model(batch) for batch in batches], axis=0)
+        results = np.concatenate([self.model(batch)[:, class_of_interest] for batch in batches], axis=0)
 
-        heat_map = np.zeros(image.shape[:2])
-        counts = np.zeros(image.shape[:2])
+        heat_map = np.zeros(x_value.shape[1:3])
+        counts = np.zeros(x_value.shape[1:3])
         for idx, loc in enumerate(locations):
             change = results[idx]
             heat_map[loc[0], loc[1]] += baseline - results[idx]

@@ -5,6 +5,12 @@ import tensorflow as tf
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 
+def allow_gpu_growth():
+    gpu_devices = tf.config.experimental.list_physical_devices('GPU')
+    for device in gpu_devices:
+        tf.config.experimental.set_memory_growth(device, True)
+
+
 def set_tf_loglevel(level):
     if isinstance(level, stf):
         level_dict = {
@@ -35,6 +41,22 @@ def register_goudapath_tensor():
     tf.register_tensor_conversion_function(gouda.GoudaPath, goudapath_to_tensor)
 
 
+def enforce_4D(image, dtype=tf.float32):
+    if not isinstance(image, tf.Tensor):
+        image = tf.convert_to_tensor(image)
+
+    ndims = image.get_shape().ndims
+    if ndims == 2:
+        image = image[None, :, :, None]
+    elif ndims == 3 and image.shape[0] == 1:
+        image = image[:, :, :, None]
+    elif ndims == 3:
+        image = image[None, :, :, :]
+    elif ndims != 4:
+        raise ValueError('Unknown image shape: {}'.format(image.shape))
+    return tf.cast(image, dtype)
+
+
 @tf.function
 def count_nonzero(x, y):
     """Nonzero counter for input/label paired datasets"""
@@ -63,7 +85,7 @@ def get_binary_class_weights(dataset, return_initial_bias=False):
         return [zero_weight, one_weight]
 
 
-def get_image_augmenter(random_crop=[30, 30], flip_h=True, flip_v=True, after_batching=False):
+def get_image_augmenter_lite(random_crop=[30, 30], flip_h=True, flip_v=True, after_batching=False):
     """Return an augmentation method for TF image dataset pipelines
 
     Parameters
@@ -95,6 +117,122 @@ def get_image_augmenter(random_crop=[30, 30], flip_h=True, flip_v=True, after_ba
     return tf.function(augment_func)
 
 
+def tf_transform(images, transforms, interpolation='NEAREST', output_shape=None, name=None):
+    """Applies the given transform(s) to the image(s).
+
+    Note: This is just a quick copy of
+    tensorflow_addons.image.transform_ops.transform for the augmenter.
+    """
+    with tf.name_scope(name or 'transform'):
+        images = enforce_4D(images)
+        if len(transforms.get_shape()) == 1:
+            transforms = transforms[None]
+        elif transforms.get_shape().ndims is None:
+            raise ValueError("transforms rank must be statically known")
+        elif len(transforms.get_shape()) == 2:
+            transforms = transforms
+        else:
+            transforms = transforms
+            raise ValueError(
+                "transforms should have rank 1 or 2, but got rank %d"
+                % len(transforms.get_shape())
+            )
+
+        output = tf.raw_ops.ImageProjectiveTransformV2(
+            images=images,
+            transforms=transforms,
+            output_shape=tf.shape(images)[1:3],
+            interpolation=interpolation.upper(),
+        )
+        return output
+
+
+def matrices_to_flat_transforms(transform_matrices, name=None):
+    """Converts affine matrices to projective transforms.
+
+    Note: This is just a quick copy of
+    tensorflow_addons.image.transform_ops.matrices_to_flat_transforms
+    for the augmenter.
+    """
+    with tf.name_scope(name or "matrices_to_flat_transforms"):
+        transform_matrices = tf.convert_to_tensor(
+            transform_matrices, name="transform_matrices"
+        )
+        if transform_matrices.shape.ndims not in (2, 3):
+            raise ValueError(
+                "Matrices should be 2D or 3D, got: %s" % transform_matrices
+            )
+        transforms = tf.reshape(transform_matrices, tf.constant([-1, 9]))
+        transforms /= transforms[:, 8:9]
+        return transforms[:, :8]
+
+
+def get_image_augmenter(flip_h=True, flip_v=False, width_scale_range=(1.0, 1.0), height_scale_range=(1.0, 1.0), max_rotation=0.0, max_shear=0.0, x_max_shift=30, y_max_shift=30, as_degrees=True, label_as_map=True, **kwargs):
+    """Get an augmentation function for image/label paired data points
+
+    Parameters
+    ----------
+    flip_h : bool
+        Whether to randomly apply horizontal flips (the default is True)
+    flip_v : bool
+        Whether to randomly apply vertical flips (the default is True)
+    width_scale_range : (float, float) | float
+        The minimum and maximum scaling factor for image width OR the factor in either direction ie. 0.05 -> [0.95, 1.05] (the default is (1.0, 1.0))
+    height_scale_range : (float, float) | float
+        The minimum and maximum scaling factor for image height OR the factor in either direction ie. 0.05 -> [0.95, 1.05] (the default is (1.0, 1.0))
+    max_rotation : float
+        The maximum rotation (in either direction) for the image (the default is 0)
+    max_shear : float
+        The maximum shear angle (in either direction) for the image (the default is 0)
+    x_max_shift : int
+        The maximum shift in pixels for the image (the default is 30)
+    y_max_shift : int
+        The maximum shift in pixels for the image (the default is 30)
+    as_degrees : bool
+        Whether the input rotation/shear values are in degrees rather than radians (the default is True)
+    label_as_map : bool
+        Whether to treat the label as a class map with the same size as the image or as a scalar class (the default is True).
+    """
+    if as_degrees:
+        max_rotation = np.radians(max_rotation)
+        max_shear = np.radians(max_shear)
+    if not hasattr(width_scale_range, '__len__') or len(width_scale_range) == 1:
+        width_scale_range = (1 - width_scale_range, 1 + width_scale_range)
+    if not hasattr(height_scale_range, '__len__') or len(height_scale_range) == 1:
+        height_scale_range = (1 - height_scale_range, 1 + height_scale_range)
+
+    def augment_func(image, label):
+        if flip_h:
+            if tf.random.normal([1]) > 0:
+                image = tf.image.flip_left_right(image)
+                if label_as_map:
+                    label = tf.image.flip_left_right(label)
+        if flip_v:
+            if tf.random.normal([1]) > 0:
+                image = tf.image.flip_up_down(image)
+                if label_as_map:
+                    label = tf.image.flip_up_down(label)
+
+        width_scale = tf.random.uniform([], *width_scale_range)
+        height_scale = tf.random.uniform([], *height_scale_range)
+        rotation = tf.random.uniform([], -max_rotation, max_rotation)
+        shear = tf.random.uniform([], -max_shear, max_shear)
+        shift_x = tf.random.uniform([], -x_max_shift, x_max_shift)
+        shift_y = tf.random.uniform([], -y_max_shift, y_max_shift)
+
+        row_1 = tf.stack([width_scale * tf.cos(rotation), -height_scale * tf.sin(rotation + shear), shift_x])
+        row_2 = tf.stack([width_scale * tf.sin(rotation), height_scale * tf.cos(rotation + shear), shift_y])
+        row_3 = tf.stack([0.0, 0.0, 1.0])
+        params = tf.stack([row_1, row_2, row_3])
+
+        flat_transform = matrices_to_flat_transforms(tf.linalg.inv(params))
+        image = tf_transform(image, flat_transform, interpolation='BILINEAR')
+        if label_as_map:
+            label = tf_transform(label, flat_transform, interpolation='NEAREST')
+        return image, label
+    return tf.function(augment_func)
+
+
 @tf.function
 def sobel_converter(image, label):
     """Convert the image to a gradient magnitude estimation using sobel edge detection"""
@@ -113,12 +251,13 @@ def sobel_converter(image, label):
 
 
 @tf.function
-def scale_image(image, label):
+def rescale_image(image, dtype=tf.float32):
     """Rescale the image to have a minimum of 0 and maximum of 1"""
+    image = tf.cast(image, dtype)
     min_pix = tf.reduce_min(image)
     max_pix = tf.reduce_max(image)
     image = (image - min_pix) / (max_pix - min_pix)
-    return image, label
+    return image
 
 
 def numpy_to_native(item):
@@ -189,3 +328,29 @@ def elastic_transform(image, label=None, alpha=2, sigma=0.04):
 #     blur = _gaussian_kernel(3, 2, 3, img.dtype)
 #     img = tf.nn.depthwise_conv2d(img[None], blur, [1,1,1,1], 'SAME')
 #     return img[0]
+
+
+def get_image_and_label_loader(image_type='jpg', dtype=tf.float32):
+    """Get the tf.function to load an image/label pair.
+
+    NOTE: tf.io.decode_jpeg/png is slightly faster than decode_image (~0.0002 sec/image)
+
+    NOTE: The function will take a single tensor of size [2] with form [image_path, label_path]
+    """
+    if image_type == 'jpg':
+        decoder = tf.io.decode_jpeg
+    elif image_type == 'png':
+        decoder = tf.io.decode_png
+    else:
+        decoder = tf.io.decode_image
+
+    def loader(paths):
+        image_path = paths[0]
+        label_path = paths[1]
+        image = decoder(tf.io.read_file(image_path))
+        image = rescale_image(image)
+        label = decoder(tf.io.read_file(label_path))
+        label = rescale_image(label)
+        return image, label
+
+    return tf.function(loader)

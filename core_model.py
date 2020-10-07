@@ -11,9 +11,9 @@ except ModuleNotFoundError:
     import dummy_bar as tqdm
 
 # Setup tensorflow
-gpu_devices = tf.config.experimental.list_physical_devices("GPU")
-for device in gpu_devices:
-    tf.config.experimental.set_memory_growth(device, True)
+# gpu_devices = tf.config.experimental.list_physical_devices("GPU")
+# for device in gpu_devices:
+#     tf.config.experimental.set_memory_growth(device, True)
 AUTOTUNE = tf.data.experimental.AUTOTUNE
 
 from .losses import get_loss_func
@@ -120,8 +120,9 @@ class CoreModel(object):
     def save_args(self):
         save_args = self.model_args.copy()
         for key in save_args:
-            if 'function' in str(type(save_args[key])):
+            if 'function' in str(type(save_args[key])) or 'CategoricalCrossentropy' in str(type(save_args[key])):
                 save_args['key'] = 'custom'
+
         gouda.save_json(save_args, self.model_dir / 'model_args.json')
 
     def clear(self):

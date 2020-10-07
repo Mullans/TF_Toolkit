@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import Input, Model
-from tensorflow.keras.layers import (Activation, BatchNormalization, Concatenate, Conv2D, Conv3D, Conv2DTranspose, Conv3DTranspose, Dense, Dropout, Flatten, GlobalAveragePooling2D, GlobalAveragePooling3D, MaxPooling3D, LeakyReLU, Multiply, ReLU, DepthwiseConv2D, AveragePooling2D)
+from tensorflow.keras.layers import (Activation, BatchNormalization, Concatenate, Conv2D, Conv3D, Conv2DTranspose, Conv3DTranspose, Dense, Dropout, Flatten, GlobalAveragePooling2D, GlobalAveragePooling3D, MaxPooling3D, LeakyReLU, Multiply, ReLU, DepthwiseConv2D, AveragePooling2D, Softmax)
 
 
 # Layer Definitions
@@ -59,8 +59,8 @@ def dual_attention_block(layer_input, ratio=16, name='sau_block'):
     channel_block = Dense(num_channels, activation='sigmoid', name=name + '/channel_dense2')(channel_block)
     channel_block = Multiply(name=name + '/channel_multiply')([layer_input, channel_block])
 
-    spatial_block = Conv2D(num_channels // 2, (1, 1, 1), padding='same', activation='relu', name=name + '/spatial_conv1')(layer_input)
-    spatial_block = Conv2D(1, (1, 1, 1), padding='same', activation='sigmoid', name=name + '/spatial_conv2')(spatial_block)
+    spatial_block = Conv2D(num_channels // 2, (1, 1), padding='same', activation='relu', name=name + '/spatial_conv1')(layer_input)
+    spatial_block = Conv2D(1, (1, 1), padding='same', activation='sigmoid', name=name + '/spatial_conv2')(spatial_block)
     return Multiply(name=name + '/spatial_multiply')([channel_block, spatial_block])
 
 
@@ -508,6 +508,85 @@ def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, **
     return Model(inputs=inputs, outputs=output_value)
 
 
+def segnet_2d(input_shape=(800, 640, 3), output_classes=1, filter_scale=0, **kwargs):
+    """2d segmentation network for feet and wounds"""
+    inputs = tf.keras.Input(shape=(tuple(input_shape)), name='input_image')
+
+    # Encoder
+    layer1 = conv_layer(inputs, 2 ** (filter_scale + 3), strides=(1, 1), name='conv1')
+    layer1b = conv_layer(layer1, 2 ** (filter_scale + 3), strides=(2, 2), name='conv1b')
+
+    layer2 = conv_layer(layer1b, 2 ** (filter_scale + 4), strides=(1, 1), name='conv2')
+    layer2b = conv_layer(layer2, 2 ** (filter_scale + 4), strides=(2, 2), name='conv2b')
+
+    layer3 = conv_layer(layer2b, 2 ** (filter_scale + 5), strides=(1, 1), name='conv3')
+    layer3b = conv_layer(layer3, 2 ** (filter_scale + 5), strides=(2, 2), name='conv3b')
+
+    layer4 = conv_layer(layer3b, 2 ** (filter_scale + 6), strides=(1, 1), name='conv4')
+    layer4b = conv_layer(layer4, 2 ** (filter_scale + 6), strides=(2, 2), name='conv4b')
+
+    layer5 = conv_layer(layer4b, 2 ** (filter_scale + 7), strides=(1, 1), name='conv5')
+    layer5b = conv_layer(layer5, 2 ** (filter_scale + 7), strides=(2, 2), name='conv5b')
+
+    # Mid Flow
+    layer6 = conv_layer(layer5b, 2 ** (filter_scale + 7), strides=(1, 1), name='conv6')
+    layer6b = conv_layer(layer6, 2 ** (filter_scale + 6), strides=(1, 1), name='conv6b')
+
+    # Decoder
+    layer7 = deconv_layer(layer6, 2 ** (filter_scale + 6), strides=(2, 2), name='deconv7')
+    layer7 = Concatenate(name='concat7')([layer4b, layer7])
+    layer7b = conv_layer(layer7, 2 ** (filter_scale + 5), strides=(1, 1), name='conv7b')
+    layer7b = dual_attention_block(layer7b, ratio=2, name='DAP7b')
+
+    layer8 = deconv_layer(layer7b, 2 ** (filter_scale + 5), strides=(2, 2), name='conv8')
+    layer8 = Concatenate(name='concat8')([layer3b, layer8])
+    layer8b = conv_layer(layer8, 2 ** (filter_scale + 4), strides=(1, 1), name='conv8b')
+    layer8b = dual_attention_block(layer8b, ratio=2, name='DAP8b')
+
+    layer9 = deconv_layer(layer8b, 2 ** (filter_scale + 4), strides=(2, 2), name='conv9')
+    layer9 = Concatenate(name='concat9')([layer2b, layer9])
+    layer9b = conv_layer(layer9, 2 ** (filter_scale + 2), strides=(1, 1), name='conv9b')
+    layer9b = dual_attention_block(layer9b, 1, name='DAP9b')
+
+    layer10 = deconv_layer(layer9b, 2 ** (filter_scale + 3), strides=(2, 2), name='conv10')
+    layer10 = Concatenate(name='concat10')([layer1b, layer10])
+    layer10b = conv_layer(layer10, 2 ** (filter_scale + 2), strides=(1, 1), name='conv10b')
+    layer10b = dual_attention_block(layer10b, 1, name='DAP10b')
+
+    layer11 = deconv_layer(layer10b, 2 ** (filter_scale + 2), strides=(2, 2), name='conv11')
+    layer11 = Concatenate(name='concat11')([inputs, layer11])
+    layer11b = conv_layer(layer11, output_classes, strides=(1, 1), activation=None, name='conv11b')
+    output_value = Activation('sigmoid', name='output')(layer11b)
+    return Model(inputs=inputs, outputs=output_value)
+
+
+def covidnet(input_shape=(300, 300, 300, 1), output_classes=2, filter_scale=0, **kwargs):
+    inputs = tf.keras.Input(shape=(tuple(input_shape)), name='input_image')
+
+    layer1 = conv_layer3d(inputs, 2 ** (filter_scale + 3), padding='valid', kernel=(5, 5, 5), strides=(3, 3, 3), name='conv_1')
+    layer1b = dual_attention_block3D(layer1, ratio=1, name='attention_1')
+
+    layer2 = conv_layer3d(layer1b, 2 ** (filter_scale + 4), padding='valid', strides=(1, 1, 1), name='conv_2')
+    layer2b = dual_attention_block3D(layer2, ratio=2, name='attention_2')
+
+    layer3 = conv_layer3d(layer2b, 2 ** (filter_scale + 4), padding='valid', strides=(2, 2, 2), name='conv_3')
+    layer3b = dual_attention_block3D(layer3, ratio=2, name='attention_3')
+
+    layer4 = conv_layer3d(layer3b, 2 ** (filter_scale + 5), padding='valid', strides=(1, 1, 1), name='conv_4')
+    layer4b = dual_attention_block3D(layer4, ratio=4, name='attention_4')
+
+    layer5 = conv_layer3d(layer4b, 2 ** (filter_scale + 6), padding='valid', strides=(1, 1, 1), name='conv_5')
+    layer5b = dual_attention_block3D(layer5, name='attention_5')
+
+    layer6 = conv_layer3d(layer5b, 2 ** (filter_scale + 6), padding='valid', strides=(1, 1, 1), name='conv_6')
+    layer6b = dual_attention_block3D(layer6, name='attention_6')
+
+    pooling_layer = GlobalAveragePooling3D(name='avgpool')(layer6b)
+    dense_first = dense_layer(pooling_layer, 2 ** (filter_scale + 7), name='dense_1')
+    dense_out = dense_layer(dense_first, 2, activation=Softmax)
+    return Model(inputs=inputs, outputs=dense_out)
+
+
 # Convenience method for model lookup
 def get_model_func(model_type):
     models = {
@@ -517,7 +596,9 @@ def get_model_func(model_type):
         'mobilenet': mobilenet,
         'combonet': combined_networks,
         'combonet-label': uncombined_network,
-        'segnet3d': segnet_3d
+        'segnet3d': segnet_3d,
+        'segnet2d': segnet_2d,
+        'covidnet': covidnet
     }
     if model_type not in models:
         raise NotImplementedError("Model type '{}' does not exist".format(model_type))
