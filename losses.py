@@ -78,6 +78,10 @@ def binary_crossentropy(from_logits=False, label_smoothing=0, reduction='auto', 
     return tf.keras.losses.BinaryCrossentropy(from_logits=from_logits, label_smoothing=label_smoothing, reduction=reduction)
 
 
+def categorical_crossentropy(from_logits=False, label_smoothing=0, reduction='auto', **kwargs):
+    return tf.keras.losses.CategoricalCrossentropy(from_logits=from_logits, label_smoothing=label_smoothing, reduction=reduction)
+
+
 def weighted_crossentropy(pos_weight=1, label_smoothing=0, **kwargs):
     smooth_val = label_smoothing * 2
 
@@ -99,7 +103,7 @@ def get_loss_func(loss_type, **kwargs):
     Optional Parameters
     -------------------
     label_smoothing : float
-        [0, 1] value to shift labels away from 0 or 1 - currntly only in bce or iou_bce
+        [0, 1] value to shift labels away from 0 or 1 - currently only in bce or iou_bce
     beta : float
         [0, 1] value for IOU weight in iou_bce or background weight in focal
     gamma : float
@@ -116,6 +120,7 @@ def get_loss_func(loss_type, **kwargs):
     """
     losses = {
         'bce': binary_crossentropy,
+        'cce': categorical_crossentropy,
         'iou': IOU_loss,
         'iou_bce': mixed_IOU_BCE_loss,
         'focal': focal_loss,

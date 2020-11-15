@@ -16,10 +16,16 @@ class CoreLoggingHandler(object):
         if train_metrics is None:
             self.train_metrics = []
         else:
+            for metric in train_metrics:
+                if not isinstance(metric, MetricWrapper):
+                    raise ValueError("Metrics used to initialize logging handlers must be MetricWrapper objects")
             self.train_metrics = train_metrics
         if val_metrics is None:
             self.val_metrics = []
         else:
+            for metric in val_metrics:
+                if not isinstance(metric, MetricWrapper):
+                    raise ValueError("Metrics used to initialize logging handlers must be MetricWrapper objects")
             self.val_matrics = val_metrics
 
     def _get_log_string(self, prefix):
@@ -41,16 +47,18 @@ class CoreLoggingHandler(object):
         if not in_training and not in_validation:
             raise ValueError("Metrics must be in either training or validation")
         if in_training:
-            self.train_metrics.append(MetricWrapper(metric, relevant_idx, name=name))
+            metric_name = name
+            if name is not None:
+                metric_name = 'Train_' + name if in_validation and 'train' not in name.lower() else name
+            self.train_metrics.append(MetricWrapper(metric, relevant_idx, name=metric_name))
         if in_validation:
-            self.val_metrics.append(MetricWrapper(metric, relevant_idx, name=name, metric_type='val'))
+            metric_name = name
+            if name is not None:
+                metric_name = 'Val_' + name if in_training and 'val' not in name.lower() else name
+            self.val_metrics.append(MetricWrapper(metric, relevant_idx, name=metric_name))
 
     def start(self, logdir, total_epochs=None):
         self.epochs = total_epochs
-        for metric in self.train_metrics:
-            metric.compile()
-        for metric in self.val_metrics:
-            metric.compile()
 
     def write(self, prefix):
         raise NotImplementedError("A derived class should implement write()")

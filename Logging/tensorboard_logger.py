@@ -13,10 +13,10 @@ class TensorboardLoggingHandler(CoreLoggingHandler):
             epoch = 0
         with self.train_writer.as_default():
             for metric in self.train_metrics:
-                tf.summary.scalar(metric.metric_name, metric.result(), step=epoch)
+                tf.summary.scalar(metric.name, metric.result(), step=epoch)
         with self.val_writer.as_default():
             for metric in self.val_metrics:
-                tf.summary.scalar(metric.metric_name, metric.result(), step=epoch)
+                tf.summary.scalar(metric.name, metric.result(), step=epoch)
         for metric in self.train_metrics + self.val_metrics:
             metric.reset_states()
         return log_string

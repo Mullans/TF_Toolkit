@@ -1,63 +1,61 @@
+import abc
 import tensorflow as tf
 
 
-def get_metric(metric_name, name=None):
+def get_metric(metric_name):
     metric_lookup = {
-        'loss': [tf.keras.metrics.Mean, 'Loss: {:.4f}'],
-        'accuracy': [tf.keras.metrics.BinaryAccuracy, 'Accuracy: {:6.2f}%'],
-        'recall': [tf.keras.metrics.Recall, 'Recall: {:.4f}'],
-        'precision': [tf.keras.metrics.Precision, 'Precision: {:.4f}'],
-        'balance': [BalanceMetric, 'Balance: {:6.2f}%'],
-        'mcc': [MatthewsCorrelationCoefficient, 'MCC: {:.4f}'],
-        'dice': [ScalarDiceScore, 'Dice: {:.4f}'],
-        'bool_dice': [BooleanDiceScore, 'Boolean Dice: {:.4f}']
+        'loss': tf.keras.metrics.Mean,
+        'accuracy': tf.keras.metrics.BinaryAccuracy,
+        'recall': tf.keras.metrics.Recall,
+        'precision': tf.keras.metrics.Precision,
+        'balance': BalanceScore,
+        'mcc': MatthewsCorrelationCoefficient,
+        'dice': ScalarDiceScore,
+        'bool_dice': BooleanDiceScore,
+        'auc': tf.keras.metrics.AUC,
     }
     if metric_name not in metric_lookup:
-        raise NotImplementedError("A wrapper for that metric type has not been added yet")
-    func, pat = metric_lookup[metric_name]
-    if name is not None:
-        pat = name + pat
-    return func, pat
+        raise ValueError("Unknown metric name: {}".format(metric_name))
+    return metric_lookup[metric_name]
 
 
 class MetricWrapper(object):
-    def __init__(self, metric_name, relevant_idx, name=None, metric_type='train'):
-        self.metric = None
-        self.metric_func, log_pattern = get_metric(metric_name, name)
-        self.metric_name = metric_name if name is None else name
-        if isinstance(relevant_idx, int):
-            relevant_idx = [relevant_idx]
-        self.relevant_idx = relevant_idx
-        self.log_pattern = metric_type.title() + ' ' + log_pattern
-        self.as_percent = '%' in log_pattern
-        self.metric_type = metric_type
+    def __init__(self, metric, relevant_idx, logging_pattern="{:.4f}", as_percent=False, *metric_args, **metric_kwargs):
+        if isinstance(metric, str):
+            self.metric = get_metric(metric)(*metric_args, **metric_kwargs)
+        elif isinstance(metric, tf.keras.metrics.Metric):
+            self.metric = metric
+        elif isinstance(metric, abc.ABCMeta):
+            self.metric = metric(*metric_args, **metric_kwargs)
 
-    def compile(self):
-        self.metric = self.metric_func(name=self.metric_type + '_' + self.metric_name)
+        self.name = self.metric.name
+        self.relevant_idx = relevant_idx
+        self.pattern = self.name.replace("Train_", 'Train ').replace("Val_", 'Val') + ': ' + logging_pattern
+        self.as_percent = as_percent
 
     def __call__(self, results):
         self.metric(*[tf.squeeze(results[idx]) for idx in self.relevant_idx])
 
-    def result(self):
-        return self.metric.result()
-
     def log_string(self):
         if self.as_percent:
-            return self.log_pattern.format(self.result() * 100)
-        return self.log_pattern.format(self.result())
+            return self.pattern.format(self.result() * 100)
+        return self.pattern.format(self.result())
 
     def reset_states(self):
         self.metric.reset_states()
 
+    def result(self):
+        return self.metric.result()
+
     def __repr__(self):
-        return "['" + self.metric_name + "'] " + repr(self.metric_func)
+        return "['" + self.name + "'] " + repr(self.metric)
 
 
-# @tf.keras.utils.register_keras_serializable(package='Custom')
-class BalanceMetric(tf.keras.metrics.Metric):
+# @tf.keras.utils.register_keras_serializable(package='TF_Toolkit')
+class BalanceScore(tf.keras.metrics.Metric):
     """TF Metric for binary prediction balance"""
     def __init__(self, name='prediction_balance', use_majority=False, **kwargs):
-        super(BalanceMetric, self).__init__(name=name, **kwargs)
+        super(BalanceScore, self).__init__(name=name, **kwargs)
         self.use_majority = use_majority
         self.positives = self.add_weight(name='pos', initializer='zeros')
         self.total = self.add_weight(name='total', initializer='zeros')
@@ -68,7 +66,7 @@ class BalanceMetric(tf.keras.metrics.Metric):
         self.total.assign_add(tf.cast(tf.size(y_pred), self.dtype))
 
     def result(self):
-        ratio = tf.divide(self.positives, self.total)
+        ratio = tf.math.divide_no_nan(self.positives, self.total)
         if self.use_majority:
             return tf.maximum(ratio, 1 - ratio)
         return ratio
@@ -81,11 +79,11 @@ class BalanceMetric(tf.keras.metrics.Metric):
         config = {
             "use_majority": self.use_majority,
         }
-        base_config = super(BalanceMetric, self).get_config()
+        base_config = super(BalanceScore, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
-# @tf.keras.utils.register_keras_serializable(package='Custom')
+# @tf.keras.utils.register_keras_serializable(package='TF_Toolkit')
 class MatthewsCorrelationCoefficient(tf.keras.metrics.Metric):
     """TF implementation of MatthewsCorrelationCoefficient"""
     def __init__(self, name='MCC', return_all=False, dtype=tf.float32):
@@ -130,7 +128,7 @@ class MatthewsCorrelationCoefficient(tf.keras.metrics.Metric):
         self.false_negative.assign(0.)
 
 
-# @tf.keras.utils.register_keras_serializable(package='Custom')
+# @tf.keras.utils.register_keras_serializable(package='TF_Toolkit')
 class BooleanDiceScore(tf.keras.metrics.Metric):
     """Dice score based on thresholding predictions to booleans"""
     def __init__(self, name='BooleanDiceScore', dtype=tf.float32):
@@ -166,7 +164,7 @@ class BooleanDiceScore(tf.keras.metrics.Metric):
         self.false_negative.assign(0.)
 
 
-# @tf.keras.utils.register_keras_serializable(package='Custom')
+# @tf.keras.utils.register_keras_serializable(package='TF_Toolkit')
 class ScalarDiceScore(tf.keras.metrics.Metric):
     """Dice score using continuous values"""
     def __init__(self, name='ScalarDiceScore', dtype=tf.float32):

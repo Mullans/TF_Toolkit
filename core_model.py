@@ -21,6 +21,7 @@ from .model_arch import get_model_func
 from .learning_rates import get_lr_func
 from .stable_counter import StableCounter
 from .train_functions import get_update_step
+from .Logging import EmptyLoggingHandler
 
 # assumes this is in a child directory (usually ./scripts) of the main project
 # PROJECT_DIR = os.path.realpath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
@@ -119,9 +120,9 @@ class CoreModel(object):
 
     def save_args(self):
         save_args = self.model_args.copy()
-        for key in save_args:
-            if 'function' in str(type(save_args[key])) or 'CategoricalCrossentropy' in str(type(save_args[key])):
-                save_args['key'] = 'custom'
+        for key in self.model_args:
+            if 'function' in str(type(save_args[key])) or '.keras.losses' in str(type(save_args[key])):
+                save_args[key] = 'custom'
 
         gouda.save_json(save_args, self.model_dir / 'model_args.json')
 
@@ -253,7 +254,7 @@ class CoreModel(object):
     def train(self,
               train_data,
               val_data,
-              logging_handler,
+              logging_handler=None,
               starting_epoch=1,
               lr_type=None,
               loss_type=None,
@@ -265,6 +266,9 @@ class CoreModel(object):
         log_dir = gouda.ensure_dir(self.model_dir(version))
         args_path = log_dir('training_args.json')
         weights_dir = gouda.ensure_dir(log_dir('training_weights'))
+
+        if logging_handler is None:
+            logging_handler = EmptyLoggingHandler()
 
         train_args = {'epochs': epochs, 'lr_type': lr_type, 'loss_type': loss_type}
         for key in kwargs:
@@ -326,9 +330,9 @@ class CoreModel(object):
 
         # Save training args as json
         save_args = train_args.copy()
-        for key in save_args:
+        for key in train_args:
             if 'function' in str(type(save_args[key])):
-                save_args['key'] = 'custom'
+                save_args[key] = 'custom'
         gouda.save_json(train_args, args_path)
 
         # Start loggers
