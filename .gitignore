@@ -7,4 +7,3 @@ ignore_*
 .ipynb_checkpoints
 Results/*
 Notebooks
-Notebooks/*
