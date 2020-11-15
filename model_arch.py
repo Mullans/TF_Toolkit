@@ -64,6 +64,24 @@ def dual_attention_block(layer_input, ratio=16, name='sau_block'):
     return Multiply(name=name + '/spatial_multiply')([channel_block, spatial_block])
 
 
+def dual_attention_blockv2(layer_input, ratio=16, name='sau_blockv2'):
+    """Dual attention decoder block from SAUNet https://arxiv.org/pdf/2001.07645.pdf
+
+    NOTE
+    ----
+    The v2 block uses a mask of the sigmoid + 1 so that signal is only enhanced, not suppressed. The other block uses a mask of just the sigmoid so that signal is only suppressed, not enhanced."""
+    num_channels = layer_input.shape[-1]
+    squeeze_channels = max(num_channels // ratio, 1)
+    channel_block = GlobalAveragePooling2D(name=name + '/channel_GAP')(layer_input)
+    channel_block = Dense(squeeze_channels, activation='relu', name=name + '/channel_dense1')(channel_block)
+    channel_block = Dense(num_channels, activation='sigmoid', name=name + '/channel_dense2')(channel_block) + 1
+    channel_block = Multiply(name=name + '/channel_multiply')([layer_input, channel_block])
+
+    spatial_block = Conv2D(num_channels // 2, (1, 1), padding='same', activation='relu', name=name + '/spatial_conv1')(layer_input)
+    spatial_block = Conv2D(1, (1, 1), padding='same', activation='sigmoid', name=name + '/spatial_conv2')(spatial_block) + 1
+    return Multiply(name=name + '/spatial_multiply')([channel_block, spatial_block])
+
+
 def dual_attention_block3D(layer_input, ratio=16, name='sau_block'):
     """Dual attention decoder block from SAUNet, extended to 3D https://arxiv.org/pdf/2001.07645.pdf"""
     num_channels = layer_input.shape[-1]
@@ -75,6 +93,25 @@ def dual_attention_block3D(layer_input, ratio=16, name='sau_block'):
 
     spatial_block = Conv3D(num_channels // 2, (1, 1, 1), padding='same', activation='relu', name=name + '/spatial_conv1')(layer_input)
     spatial_block = Conv3D(1, (1, 1, 1), padding='same', activation='sigmoid', name=name + '/spatial_conv2')(spatial_block)
+    return Multiply(name=name + '/spatial_multiply')([channel_block, spatial_block])
+
+
+def dual_attention_block3Dv2(layer_input, ratio=16, name='sau_blockv2'):
+    """Dual attention decoder block from SAUNet, extended to 3D https://arxiv.org/pdf/2001.07645.pdf
+
+    NOTE
+    ----
+    The v2 block uses a mask of the sigmoid + 1 so that signal is only enhanced, not suppressed. The other block uses a mask of just the sigmoid so that signal is only suppressed, not enhanced.
+    """
+    num_channels = layer_input.shape[-1]
+    squeeze_channels = max(num_channels // ratio, 1)
+    channel_block = GlobalAveragePooling3D(name=name + '/channel_GAP')(layer_input)
+    channel_block = Dense(squeeze_channels, activation='relu', name=name + '/channel_dense1')(channel_block)
+    channel_block = Dense(num_channels, activation='sigmoid', name=name + '/channel_dense2')(channel_block) + 1
+    channel_block = Multiply(name=name + '/channel_multiply')([layer_input, channel_block])
+
+    spatial_block = Conv3D(num_channels // 2, (1, 1, 1), padding='same', activation='relu', name=name + '/spatial_conv1')(layer_input)
+    spatial_block = Conv3D(1, (1, 1, 1), padding='same', activation='sigmoid', name=name + '/spatial_conv2')(spatial_block) + 1
     return Multiply(name=name + '/spatial_multiply')([channel_block, spatial_block])
 
 
@@ -456,13 +493,15 @@ def uncombined_network(input_shape=[512, 512, 1], drop_rate=0.2, dense_out=128, 
     return Model(inputs=input_image, outputs=output_label)
 
 
-def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, **kwargs):
+def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, attention_type=1, **kwargs):
     """3d segmentation network for lungs + lung nodules"""
     inputs = tf.keras.Input(shape=(tuple(input_shape)), name='input_image')
 
     # Encoder
-    layer1 = conv_layer3d(inputs, 2 ** (filter_scale + 2), strides=(1, 1, 1), name='conv1')
-    layer1b = conv_layer3d(layer1, 2 ** (filter_scale + 2), strides=(2, 2, 2), name='conv1b')
+    if attention_type == 1:
+        att_block = dual_attention_block3D
+    elif attention_type == 2:
+        att_block = dual_attention_block3Dv2
 
     layer2 = conv_layer3d(layer1b, 2 ** (filter_scale + 3), strides=(1, 1, 1), name='conv2')
     layer2b = conv_layer3d(layer2, 2 ** (filter_scale + 3), strides=(1, 2, 2), name='conv2b')
@@ -484,22 +523,22 @@ def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, **
     layer7 = deconv_layer3d(layer6, 2 ** (filter_scale + 5), strides=(2, 2, 2), name='deconv7')
     layer7 = Concatenate(name='concat7')([layer4b, layer7])
     layer7b = conv_layer3d(layer7, 2 ** (filter_scale + 4), strides=(1, 1, 1), name='conv7b')
-    layer7b = dual_attention_block3D(layer7b, ratio=2, name='DAP7b')
+    layer7b = att_block(layer7b, ratio=2, name='DAP7b')
 
     layer8 = deconv_layer3d(layer7b, 2 ** (filter_scale + 4), strides=(1, 2, 2), name='conv8')
     layer8 = Concatenate(name='concat8')([layer3b, layer8])
     layer8b = conv_layer3d(layer8, 2 ** (filter_scale + 3), strides=(1, 1, 1), name='conv8b')
-    layer8b = dual_attention_block3D(layer8b, ratio=2, name='DAP8b')
+    layer8b = att_block(layer8b, ratio=2, name='DAP8b')
 
     layer9 = deconv_layer3d(layer8b, 2 ** (filter_scale + 3), strides=(2, 2, 2), name='conv9')
     layer9 = Concatenate(name='concat9')([layer2b, layer9])
     layer9b = conv_layer3d(layer9, 2 ** (filter_scale + 2), strides=(1, 1, 1), name='conv9b')
-    layer9b = dual_attention_block3D(layer9b, 1, name='DAP9b')
+    layer9b = att_block(layer9b, 1, name='DAP9b')
 
     layer10 = deconv_layer3d(layer9b, 2 ** (filter_scale + 2), strides=(1, 2, 2), name='conv10')
     layer10 = Concatenate(name='concat10')([layer1b, layer10])
     layer10b = conv_layer3d(layer10, 2 ** (filter_scale + 1), strides=(1, 1, 1), name='conv10b')
-    layer10b = dual_attention_block3D(layer10b, 1, name='DAP10b')
+    layer10b = att_block(layer10b, 1, name='DAP10b')
 
     layer11 = deconv_layer3d(layer10b, 2 ** (filter_scale + 1), strides=(2, 2, 2), name='conv11')
     layer11 = Concatenate(name='concat11')([inputs, layer11])
@@ -508,9 +547,14 @@ def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, **
     return Model(inputs=inputs, outputs=output_value)
 
 
-def segnet_2d(input_shape=(800, 640, 3), output_classes=1, filter_scale=0, **kwargs):
+def segnet_2d(input_shape=(800, 640, 3), output_classes=1, filter_scale=0, attention_type=1, **kwargs):
     """2d segmentation network for feet and wounds"""
     inputs = tf.keras.Input(shape=(tuple(input_shape)), name='input_image')
+
+    if attention_type == 1:
+        att_block = dual_attention_block
+    elif attention_type == 2:
+        att_block = dual_attention_blockv2
 
     # Encoder
     layer1 = conv_layer(inputs, 2 ** (filter_scale + 3), strides=(1, 1), name='conv1')
@@ -536,22 +580,22 @@ def segnet_2d(input_shape=(800, 640, 3), output_classes=1, filter_scale=0, **kwa
     layer7 = deconv_layer(layer6, 2 ** (filter_scale + 6), strides=(2, 2), name='deconv7')
     layer7 = Concatenate(name='concat7')([layer4b, layer7])
     layer7b = conv_layer(layer7, 2 ** (filter_scale + 5), strides=(1, 1), name='conv7b')
-    layer7b = dual_attention_block(layer7b, ratio=2, name='DAP7b')
+    layer7b = att_block(layer7b, ratio=2, name='DAP7b')
 
     layer8 = deconv_layer(layer7b, 2 ** (filter_scale + 5), strides=(2, 2), name='conv8')
     layer8 = Concatenate(name='concat8')([layer3b, layer8])
     layer8b = conv_layer(layer8, 2 ** (filter_scale + 4), strides=(1, 1), name='conv8b')
-    layer8b = dual_attention_block(layer8b, ratio=2, name='DAP8b')
+    layer8b = att_block(layer8b, ratio=2, name='DAP8b')
 
     layer9 = deconv_layer(layer8b, 2 ** (filter_scale + 4), strides=(2, 2), name='conv9')
     layer9 = Concatenate(name='concat9')([layer2b, layer9])
     layer9b = conv_layer(layer9, 2 ** (filter_scale + 2), strides=(1, 1), name='conv9b')
-    layer9b = dual_attention_block(layer9b, 1, name='DAP9b')
+    layer9b = att_block(layer9b, 1, name='DAP9b')
 
     layer10 = deconv_layer(layer9b, 2 ** (filter_scale + 3), strides=(2, 2), name='conv10')
     layer10 = Concatenate(name='concat10')([layer1b, layer10])
     layer10b = conv_layer(layer10, 2 ** (filter_scale + 2), strides=(1, 1), name='conv10b')
-    layer10b = dual_attention_block(layer10b, 1, name='DAP10b')
+    layer10b = att_block(layer10b, 1, name='DAP10b')
 
     layer11 = deconv_layer(layer10b, 2 ** (filter_scale + 2), strides=(2, 2), name='conv11')
     layer11 = Concatenate(name='concat11')([inputs, layer11])
@@ -587,6 +631,27 @@ def covidnet(input_shape=(300, 300, 300, 1), output_classes=2, filter_scale=0, *
     return Model(inputs=inputs, outputs=dense_out)
 
 
+def coughnet(input_shape=(155, 40, 2), filter_scale=0, drop_rate=0, **kwargs):
+    inputs = tf.keras.Input(shape=(tuple(input_shape)), name='input_image')
+
+    global_args = {'padding': 'valid', 'kernel': (3, 3)}
+    layer1 = conv_layer(inputs, 2 ** (filter_scale + 4), strides=(1, 1), name='conv_1', **global_args)
+    layer2 = conv_layer(layer1, 2 ** (filter_scale + 4), strides=(2, 1), name='conv_2', **global_args)
+    layer3 = conv_layer(layer2, 2 ** (filter_scale + 5), strides=(1, 1), name='conv_3', **global_args)
+    layer4 = conv_layer(layer3, 2 ** (filter_scale + 5), strides=(2, 2), name='conv_4', **global_args)
+    layer5 = conv_layer(layer4, 2 ** (filter_scale + 6), strides=(1, 1), name='conv_5', **global_args)
+    layer6 = conv_layer(layer5, 2 ** (filter_scale + 6), strides=(2, 2), name='conv_6', **global_args)
+    layer7 = conv_layer(layer6, 2 ** (filter_scale + 6), strides=(1, 1), name='conv_7', **global_args)
+
+    pool = GlobalAveragePooling2D(name='avgpool')(layer7)
+    dense1 = dense_layer(pool, 2 ** (filter_scale + 7), name='dense_8')
+    if drop_rate > 0:
+        dense1 = Dropout(drop_rate, name='dense_8/dropout')(dense1)
+    dense2 = dense_layer(pool, 1, name='dense_out', activation=None)
+    output = Activation('sigmoid', name='act_out')(dense2)
+    return Model(inputs=inputs, outputs=output)
+
+
 # Convenience method for model lookup
 def get_model_func(model_type):
     models = {
@@ -598,7 +663,8 @@ def get_model_func(model_type):
         'combonet-label': uncombined_network,
         'segnet3d': segnet_3d,
         'segnet2d': segnet_2d,
-        'covidnet': covidnet
+        'covidnet': covidnet,
+        'coughnet': coughnet
     }
     if model_type not in models:
         raise NotImplementedError("Model type '{}' does not exist".format(model_type))

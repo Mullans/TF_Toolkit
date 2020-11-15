@@ -354,3 +354,19 @@ def get_image_and_label_loader(image_type='jpg', dtype=tf.float32):
         return image, label
 
     return tf.function(loader)
+
+
+def get_pad_func(vert_padding=0, horiz_padding=0):
+    """Shortcut function for adding equal vertical or horizontal padding to an image/label paired dataset
+
+    NOTE
+    ----
+    Assumes data is of shape [batch, x, y, channels]
+    """
+    padding = [[0, 0], [vert_padding, vert_padding], [horiz_padding, horiz_padding], [0, 0]]
+
+    def pad_func(image, label):
+        image = tf.pad(image, padding)
+        label = tf.pad(label, padding)
+        return image, label
+    return tf.function(pad_func)
