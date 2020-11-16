@@ -9,4 +9,4 @@ from .model_arch import get_model_func
 from .learning_rates import get_lr_func
 from .train_functions import get_update_step
 from .core_model import CoreModel
-from .Loggers import TensorboardLoggingHandler, FileLoggingHandler
+from .Logging import TensorboardLoggingHandler, FileLoggingHandler
