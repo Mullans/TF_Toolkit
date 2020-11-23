@@ -502,6 +502,8 @@ def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, at
         att_block = dual_attention_block3D
     elif attention_type == 2:
         att_block = dual_attention_block3Dv2
+    layer1 = conv_layer3d(inputs, 2 ** (filter_scale + 2), strides=(1, 1, 1), name='conv1')
+    layer1b = conv_layer3d(layer1, 2 ** (filter_scale + 2), strides=(2, 2, 2), name='conv1b')
 
     layer2 = conv_layer3d(layer1b, 2 ** (filter_scale + 3), strides=(1, 1, 1), name='conv2')
     layer2b = conv_layer3d(layer2, 2 ** (filter_scale + 3), strides=(1, 2, 2), name='conv2b')

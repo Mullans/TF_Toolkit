@@ -24,13 +24,14 @@ class MetricWrapper(object):
         if isinstance(metric, str):
             self.metric = get_metric(metric)(*metric_args, **metric_kwargs)
         elif isinstance(metric, tf.keras.metrics.Metric):
-            self.metric = metric
+            raise ValueError('Please use a metric function rather than an initialized metric')
+            # self.metric = metric
         elif isinstance(metric, abc.ABCMeta):
             self.metric = metric(*metric_args, **metric_kwargs)
 
         self.name = self.metric.name
         self.relevant_idx = relevant_idx
-        self.pattern = self.name.replace("Train_", 'Train ').replace("Val_", 'Val') + ': ' + logging_pattern
+        self.pattern = self.name.replace("Train_", 'Train ').replace("Val_", 'Val ') + ': ' + logging_pattern
         self.as_percent = as_percent
 
     def __call__(self, results):
