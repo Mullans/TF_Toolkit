@@ -333,7 +333,7 @@ class CoreModel(object):
         for key in train_args:
             if 'function' in str(type(save_args[key])):
                 save_args[key] = 'custom'
-        gouda.save_json(train_args, args_path)
+        gouda.save_json(save_args, args_path)
 
         # Start loggers
         logging_handler.start(log_dir, total_epochs=epochs)
