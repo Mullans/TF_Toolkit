@@ -1,5 +1,19 @@
+import importlib.util
+import warnings
+
 import numpy as np
 from .metrics import MetricWrapper
+
+if importlib.util.find_spec('tensorflow') is not None:
+    TF_METRICS = True
+    from .tensorflow_metrics import TensorFlowMetricWrapper
+else:
+    TF_METRICS = False
+if importlib.util.find_spec('ignite') is not None:
+    IGNITE_METRICS = True
+    from .ignite_metrics import IgniteMetricWrapper
+else:
+    IGNITE_METRICS = False
 
 
 def num_digits(x):
@@ -16,14 +30,14 @@ class CoreLoggingHandler(object):
             self.train_metrics = []
         else:
             for metric in train_metrics:
-                if not isinstance(metric, MetricWrapper):
+                if not issubclass(metric, MetricWrapper):
                     raise ValueError("Metrics used to initialize logging handlers must be MetricWrapper objects")
             self.train_metrics = train_metrics
         if val_metrics is None:
             self.val_metrics = []
         else:
             for metric in val_metrics:
-                if not isinstance(metric, MetricWrapper):
+                if not issubclass(metric, MetricWrapper):
                     raise ValueError("Metrics used to initialize logging handlers must be MetricWrapper objects")
             self.val_matrics = val_metrics
 
@@ -42,7 +56,21 @@ class CoreLoggingHandler(object):
         log_string = prefix + " " + ' || '.join([train_string, val_string])
         return log_string
 
-    def add_metric(self, metric, relevant_idx, name=None, in_training=True, in_validation=True):
+    def add_metric(self, metric, relevant_idx, name=None, in_training=True, in_validation=True, as_tf=True, as_ignite=False):
+        if as_tf and not TF_METRICS:
+            as_tf = False
+            warnings.warn('A Tensorflow install cannot be found. "as_tf" flag set to False.')
+        if as_ignite and not IGNITE_METRICS:
+            as_ignite = False
+            warnings.warn('An Ignite install cannot be found. "as_ignite" flag set to False.')
+        if as_tf and as_ignite:
+            warnings.warn('Cannot use Tensorflow and Ignite as backends for the same metric. Defaulting to TensorFlow.')
+        elif not as_tf and not as_ignite:
+            raise ValueError('No valid metric backend was found. Please install either Pytorch Ignite or TensorFlow.')
+        elif as_tf:
+            MetricWrapper = TensorFlowMetricWrapper
+        elif as_ignite:
+            MetricWrapper = IgniteMetricWrapper
         if not in_training and not in_validation:
             raise ValueError("Metrics must be in either training or validation")
         if in_training:
