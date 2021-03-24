@@ -130,6 +130,7 @@ class CoreModel(object):
         K.clear_session()
 
     def compile_model(self, model_func=None, **kwargs):
+        self.clear()
         if self.model_args['model_func'] is None and model_func is None:
             raise ValueError('No selected model function')
         for key in kwargs:

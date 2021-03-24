@@ -1,0 +1,14 @@
+{
+  "filter_scale": 0,
+  "input_shape": [
+    8,
+    256,
+    256,
+    1
+  ],
+  "model_func": "segnet3d",
+  "model_group": "LungSegmenter",
+  "model_name": "Basic",
+  "output_channels": 2,
+  "version": "default"
+}
