@@ -1,6 +1,5 @@
 import numpy as np
 from .metrics import MetricWrapper
-import tensorflow as tf
 
 
 def num_digits(x):
@@ -31,8 +30,8 @@ class CoreLoggingHandler(object):
     def _get_log_string(self, prefix):
         if isinstance(prefix, int):
             epoch = prefix + 1  # Correct for 0 indexing
-            if self.digits is None:
-                self.digits = str(num_digits(epochs))
+            if self.digits is None and self.epochs is not None:
+                self.digits = str(num_digits(epoch)) if self.epochs is None else str(num_digits(self.epochs))
             prefix = 'Epoch {:' + self.digits + 'd}'
             prefix = prefix.format(epoch)
             if self.epochs is not None:

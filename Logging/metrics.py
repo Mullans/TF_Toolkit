@@ -178,7 +178,7 @@ class ScalarDiceScore(tf.keras.metrics.Metric):
         predictions = tf.reshape(tf.cast(predictions, self.dtype), [-1])
 
         numerator = 2 * tf.reduce_sum(tf.multiply(labels, predictions))
-        denominaotr = tf.reduce_sum(tf.add(labels, predictions))
+        denominator = tf.reduce_sum(tf.add(labels, predictions))
 
         self.numerator.assign_add(numerator)
         self.denominator.assign_add(denominator)
