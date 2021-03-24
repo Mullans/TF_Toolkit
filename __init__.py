@@ -22,4 +22,4 @@ except ImportError:
     warnings.warn('Valid Tensorboard install not found. Some options will not be available.')
 
 # Does not rely on outside module
-from .stable_counter import StableCounter
+from .stable_counter import StableCounter  # noqa
