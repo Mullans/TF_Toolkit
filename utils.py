@@ -1,3 +1,5 @@
+import os
+
 import gouda
 import logging
 import numpy as np
@@ -12,7 +14,7 @@ def allow_gpu_growth():
 
 
 def set_tf_loglevel(level):
-    if isinstance(level, stf):
+    if isinstance(level, str):
         level_dict = {
             'fatal': 3,
             'error': 2,
@@ -102,11 +104,11 @@ def get_image_augmenter_lite(random_crop=[30, 30], flip_h=True, flip_v=True, aft
     def augment_func(image, label):
         image_shape = tf.shape(image)
         if after_batching:
-            height = shape[1]
-            width = shape[2]
+            height = image_shape[1]
+            width = image_shape[2]
         else:
-            height = shape[0]
-            width = shape[1]
+            height = image_shape[0]
+            width = image_shape[1]
         image = tf.image.resize_with_crop_or_pad(image, height + random_crop[0], width + random_crop[1])
         image = tf.image.random_crop(image, image_shape)
         if flip_h:
@@ -299,7 +301,12 @@ def elastic_transform(image, label=None, alpha=2, sigma=0.04):
         I don't remember - something to do with the blur strength (the default is 2)
     sigma : float
         I don't remember - something to do with the blur distance (the default is 0.04)
+
+    NOTE:
+    OpenCV is imported locally to this function so that utils.py can be used without it
     """
+    import cv2
+
     alpha = image.shape[1] * alpha
     sigma = image.shape[1] * sigma
 
@@ -370,3 +377,18 @@ def get_pad_func(vert_padding=0, horiz_padding=0):
         label = tf.pad(label, padding)
         return image, label
     return tf.function(pad_func)
+
+
+def get_center_of_mass(input_arr):
+    """Find the center of mass for the input n-dimensional array.
+
+    NOTE:
+    Assumes that input_array has shape [batch, ...]
+    If a sample in the batch has a mass of 0, the coordinates will be nan
+    """
+    grids = tf.meshgrid(*[tf.range(axis_size) for axis_size in input_arr.shape[1:]], indexing='ij')
+    coords = tf.stack([tf.reshape(grid, (-1,)) for grid in grids], axis=-1)
+    coords = tf.cast(coords, tf.float32)
+    flat_mass = tf.reshape(input_arr, [-1, tf.reduce_prod(input_arr.shape[1:]), 1])
+    total_mass = tf.reduce_sum(flat_mass, axis=1)
+    return tf.math.divide(tf.reduce_sum(flat_mass * coords, axis=1), total_mass)
