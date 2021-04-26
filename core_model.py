@@ -1,13 +1,14 @@
 import gouda
 import os
-import sys
 import tensorflow as tf
 import tensorflow.keras.backend as K
+import warnings
 
 # Try to import progress bar module
 try:
     from tqdm import auto as tqdm
 except ModuleNotFoundError:
+    warnings.warn('tqdm module not found, defaulting to print statements')
     import dummy_bar as tqdm
 
 # Setup tensorflow
@@ -22,57 +23,6 @@ from .learning_rates import get_lr_func
 from .stable_counter import StableCounter
 from .train_functions import get_update_step
 from .Logging import EmptyLoggingHandler
-
-# assumes this is in a child directory (usually ./scripts) of the main project
-# PROJECT_DIR = os.path.realpath(os.path.join(os.path.dirname(sys.argv[0]), '..'))
-
-#
-# def train_step_func(model, optimizer, loss_func, logging_handler):
-#     def train_step(inputs):
-#         x, y = inputs
-#         with tf.GradientTape() as tape:
-#             predictions = model(x, training=True)
-#             loss = loss_func(y, predictions)
-#         grad = tape.gradient(loss, model.trainable_variables)
-#         optimizer.apply_gradients(zip(grad, model.trainable_variables))
-#         logging_handler.train_step((y, predictions, loss))
-#         return loss
-#     return tf.function(train_step)
-#
-#
-# def val_step_func(model, loss_func, logging_handler):
-#     def val_step(inputs):
-#         x, y = inputs
-#         predictions = model(x, training=False)
-#         loss = loss_func(y, predictions)
-#         logging_handler.val_step((y, predictions, loss))
-#         return loss
-#     return tf.function(val_step)
-#
-#
-# def distributed_train_step_func(model, optimizer, loss_func, logging_handler, batch_size=32):
-#     """Default distributed train step for single input, single output, single loss models"""
-#     def train_step(inputs):
-#         x, y = inputs
-#         with tf.GradientTape() as tape:
-#             predictions = model(x, training=True)
-#             loss = loss_func(y, predictions)
-#         grad = tape.gradient(loss, model.trainable_variables)
-#         optimizer.apply_gradients(zip(grad, model.trainable_variables))
-#         logging_handler.train_step((y, predictions, loss / batch_size))
-#         return loss
-#     return tf.function(train_step)
-#
-#
-# def distributed_val_step_func(model, loss_func, logging_handler, batch_size=32):
-#     """Default distributed validation step for single input, single output, single loss models"""
-#     def val_step(inputs):
-#         x, y = inputs
-#         predictions = model(x, training=False)
-#         loss = loss_func(y, predictions)
-#         logging_handler.val_step((y, predictions, loss / batch_size))
-#         return loss
-#     return tf.function(val_step)
 
 
 class CoreModel(object):
@@ -93,7 +43,8 @@ class CoreModel(object):
             'train_step': 'default',
             'val_step': 'default',
             'loss_type': None,
-            'lr_type': 'base'
+            'lr_type': 'base',
+            'model_func': None
         }
         for key in kwargs:
             self.model_args[key] = kwargs[key]
@@ -109,19 +60,40 @@ class CoreModel(object):
         gouda.ensure_dir(self.model_dir)
         args_path = self.model_dir('model_args.json')
         if load_args:
-            if args_path.exists():
-                loaded_args = gouda.load_json(args_path)
-                for key in loaded_args:
-                    self.model_args[key] = loaded_args[key]
-            else:
-                raise ValueError('No file found at {}'.format(args_path.abspath))
+            self.load_args(args_path)
         if not args_path.exists():
             self.save_args()
 
+    def load_args(self, args_path):
+        """Load model arguments from a json file.
+
+        NOTE
+        ----
+        Custom methods/models/etc will be loaded with a value of 'custom' and should be replaced
+        """
+        if os.path.exists(args_path):
+            to_warn = []
+            loaded_args = gouda.load_json(args_path)
+            for key in loaded_args:
+                self.model_args[key] = loaded_args[key]
+                if loaded_args[key] == 'custom':
+                    to_warn.append(key)
+            if len(to_warn) > 0:
+                warnings.warn('Custom arguments for [{}] were found and should be replaced'.format(', '.join(to_warn)))
+        else:
+            raise ValueError('No file found at {}'.format(args_path))
+
     def save_args(self):
+        """Save model arguments to a json file in the model directory
+
+        NOTE
+        ----
+        Custom methods/models/etc will be saved with a value of 'custom' in the output file
+        """
         save_args = self.model_args.copy()
         for key in self.model_args:
-            if 'function' in str(type(save_args[key])) or '.keras.losses' in str(type(save_args[key])):
+            arg_type = str(type(save_args[key]))
+            if 'function' in arg_type or '.keras.losses' in arg_type or 'class' in arg_type:
                 save_args[key] = 'custom'
 
         gouda.save_json(save_args, self.model_dir / 'model_args.json')
@@ -187,6 +159,11 @@ class CoreModel(object):
         if isinstance(path, gouda.GoudaPath):
             path = path.abspath
         self.model.load_weights(path)
+
+    def save_weights(self, path):
+        if isinstance(path, gouda.GoudaPath):
+            path = path.abspath
+        self.model.save_weights(path)
 
     @property
     def lr_type(self):
@@ -287,7 +264,7 @@ class CoreModel(object):
         if self.model is None:
             self.compile_model()
         if starting_epoch == 1:
-            self.model.save_weights(weights_dir('model_weights_init.tf').abspath)
+            self.save_weights(weights_dir('model_weights_init.tf').abspath)
 
         # Set learning rate type
         if train_args['lr_type'] is None:
@@ -299,7 +276,7 @@ class CoreModel(object):
             lr = get_lr_func(train_args['lr_type'])(**train_args)
         else:
             lr = train_args['lr_type']
-            train_args['lr_type'] = custom
+            train_args['lr_type'] = 'custom'
         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
 
         # Set loss type
@@ -332,7 +309,8 @@ class CoreModel(object):
         # Save training args as json
         save_args = train_args.copy()
         for key in train_args:
-            if 'function' in str(type(save_args[key])):
+            key_type = str(type(save_args[key]))
+            if 'function' in key_type or 'class' in key_type:
                 save_args[key] = 'custom'
         gouda.save_json(save_args, args_path)
 
@@ -391,13 +369,13 @@ class CoreModel(object):
                 epoch_pbar.update(1)
                 if (epoch + 1) % 10 == 0:
                     weight_string = 'model_weights_e{:0' + epoch_digits + 'd}.tf'
-                    self.model.save_weights(weights_dir(weight_string.format(epoch)).abspath)
+                    self.save_weights(weights_dir(weight_string.format(epoch)).abspath)
 
         except KeyboardInterrupt:
             print("Interrupting model training...")
             logging_handler.interrupt()
         epoch_pbar.close()
-        self.model.save_weights(log_dir('model_weights.tf').abspath)
+        self.save_weights(log_dir('model_weights.tf').abspath)
         logging_handler.stop()
 
     def train_distributed(self,

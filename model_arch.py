@@ -18,7 +18,10 @@ def conv_layer(layer_input, filters, kernel=(3, 3), strides=(2, 2), padding='sam
     if batchnorm:
         conv = BatchNormalization(name=name + '/bn')(conv)
     if activation is not None:
-        conv = activation(name=name + '/act')(conv)
+        if isinstance(activation, str):
+            conv = Activation(activation, name=name + '/act')(conv)
+        else:
+            conv = activation(name=name + '/act')(conv)
     return conv
 
 

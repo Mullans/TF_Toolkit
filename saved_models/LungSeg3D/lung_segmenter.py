@@ -40,7 +40,8 @@ class LungSegmenter(CoreModel):
             premask_body : bool
                 If clean is True and crop_image is True
         """
-        if isinstance(image, str):
+        if isinstance(image, (str, os.PathLike)):
+            image = str(image)
             image = sitk.ReadImage(image)
         image_size = image.GetSize()
         body_mask = None
