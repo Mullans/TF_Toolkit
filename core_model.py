@@ -93,15 +93,33 @@ class CoreModel(object):
         save_args = self.model_args.copy()
         for key in self.model_args:
             arg_type = str(type(save_args[key]))
-            if 'function' in arg_type or '.keras.losses' in arg_type or 'class' in arg_type:
+            if 'function' in arg_type or '.keras.' in arg_type or '<class' in arg_type:
                 save_args[key] = 'custom'
-
+            elif isinstance(self.model_args[key], (list, tuple)):
+                new_args = []
+                for item in self.model_args[key]:
+                    arg_type = str(type(save_args[key]))
+                    if 'function' in arg_type or '.keras.' in arg_type or '<class' in arg_type:
+                        item = 'custom'
+                    new_args.append(item)
+                save_args[key] = new_args
         gouda.save_json(save_args, self.model_dir / 'model_args.json')
 
     def clear(self):
         K.clear_session()
 
-    def compile_model(self, model_func=None, **kwargs):
+    def compile_model(self, model_func=None, checking=False, **kwargs):
+        """Compile the model for the given function.
+
+        Parameters
+        ----------
+        model_func: str | func
+            Either the string to lookup, the model function, or None if you want to use the function from self.model_args (the default is None)
+        checking: bool
+            If true, will only compile a model if there is no compiled model already
+        """
+        if checking and self.model is not None:
+            return
         self.clear()
         if self.model_args['model_func'] is None and model_func is None:
             raise ValueError('No selected model function')
@@ -156,14 +174,19 @@ class CoreModel(object):
                 path = path + '.h5'
             else:
                 raise ValueError("No saved weights found for version `{}`".format(version))
-        if isinstance(path, gouda.GoudaPath):
-            path = path.abspath
+        if isinstance(path, os.PathLike):
+            path = str(path)
         self.model.load_weights(path)
 
     def save_weights(self, path):
         if isinstance(path, gouda.GoudaPath):
             path = path.abspath
         self.model.save_weights(path)
+
+    def export_model(self, path):
+        if isinstance(path, os.PathLike):
+            path = str(path)
+        tf.saved_model.save(self.model, path)
 
     @property
     def lr_type(self):
@@ -229,6 +252,19 @@ class CoreModel(object):
             raise ValueError("Compile the model before plotting")
         tf.keras.utils.plot_model(self.model, to_file=self.model_dir('model.png').abspath, show_shapes=True)
 
+    def _setup_optimizer(self, train_args):
+        if train_args['lr_type'] is None:
+            if self.model_args['lr_type'] is None:
+                train_args['lr_type'] = 'base'
+            else:
+                train_args['lr_type'] = self.model_args['lr_type']
+        if isinstance(train_args['lr_type'], str):
+            lr = get_lr_func(train_args['lr_type'])(**train_args)
+        else:
+            lr = train_args['lr_type']
+            train_args['lr_type'] = 'custom'
+        return tf.keras.optimizers.Adam(learning_rate=lr)
+
     def train(self,
               train_data,
               val_data,
@@ -261,23 +297,12 @@ class CoreModel(object):
         for item in val_data.take(1):
             train_args['val_batch_size'] = item[0].numpy().shape[0]
 
-        if self.model is None:
-            self.compile_model()
+        self.compile_model(checking=True)
         if starting_epoch == 1:
             self.save_weights(weights_dir('model_weights_init.tf').abspath)
 
-        # Set learning rate type
-        if train_args['lr_type'] is None:
-            if self.model_args['lr_type'] is None:
-                train_args['lr_type'] = 'base'
-            else:
-                train_args['lr_type'] = self.model_args['lr_type']
-        if isinstance(train_args['lr_type'], str):
-            lr = get_lr_func(train_args['lr_type'])(**train_args)
-        else:
-            lr = train_args['lr_type']
-            train_args['lr_type'] = 'custom'
-        optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+        # Set learning rate type and optimizer
+        optimizer = self._setup_optimizer(train_args)
 
         # Set loss type
         if train_args['loss_type'] is None:

@@ -13,6 +13,7 @@ try:  # Any code that relies on tensorflow
     from .learning_rates import get_lr_func
     from .train_functions import get_update_step
     from .core_model import CoreModel
+    from .multi_model import MultiModel
 except ImportError:
     warnings.warn("Valid TensorFlow install not found. Some options will not be available.")
 
