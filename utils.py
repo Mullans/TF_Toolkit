@@ -149,7 +149,7 @@ def tf_transform(images, transforms, interpolation='NEAREST', output_shape=None,
         return output
 
 
-def matrices_to_flat_transforms(transform_matrices, name=None):
+def matrices_to_flat_transforms(transform_matrices, invert=False, name=None):
     """Converts affine matrices to projective transforms.
 
     Note: This is just a quick copy of
@@ -157,6 +157,8 @@ def matrices_to_flat_transforms(transform_matrices, name=None):
     for the augmenter.
     """
     with tf.name_scope(name or "matrices_to_flat_transforms"):
+        if invert:
+            transform_matrices = tf.linalg.inv(transform_matrices)
         transform_matrices = tf.convert_to_tensor(
             transform_matrices, name="transform_matrices"
         )
@@ -169,7 +171,17 @@ def matrices_to_flat_transforms(transform_matrices, name=None):
         return transforms[:, :8]
 
 
-def get_image_augmenter(flip_h=True, flip_v=False, width_scale_range=(1.0, 1.0), height_scale_range=(1.0, 1.0), max_rotation=0.0, max_shear=0.0, x_max_shift=30, y_max_shift=30, as_degrees=True, label_as_map=True, **kwargs):
+def get_image_augmenter(flip_h=True,
+                        flip_v=False,
+                        width_scale_range=(1.0, 1.0),
+                        height_scale_range=(1.0, 1.0),
+                        max_rotation=0.0,
+                        max_shear=0.0,
+                        x_max_shift=30,
+                        y_max_shift=30,
+                        as_degrees=True,
+                        label_as_map=True,
+                        **kwargs):
     """Get an augmentation function for image/label paired data points
 
     Parameters
@@ -392,3 +404,262 @@ def get_center_of_mass(input_arr):
     flat_mass = tf.reshape(input_arr, [-1, tf.reduce_prod(input_arr.shape[1:]), 1])
     total_mass = tf.reduce_sum(flat_mass, axis=1)
     return tf.math.divide(tf.reduce_sum(flat_mass * coords, axis=1), total_mass)
+
+
+def rotation_matrix(center_x, center_y, rotation):
+    """Get the 3x3 rotation transformation matrix
+
+    Parameters
+    ----------
+    center: (int, int)
+        The center point of the rotation
+    rotation: int
+        The amount of rotation in degrees, positive is clock-wise
+    """
+    alpha = np.cos(np.radians(rotation))
+    beta = np.sin(np.radians(rotation))
+    transform = np.array([[alpha, beta, (1 - alpha) * center_x - beta * center_y], [-beta, alpha, beta * center_y + (1 - alpha) * center_y], [0, 0, 1]])
+    return transform
+
+
+def shear_matrix(shear):
+    """Get the 3x3 shear transformation matrix
+
+    Parameters
+    ----------
+    shear: int
+        The amount of shear in degrees
+
+    NOTE
+    ----
+    The shear holds the top of the image stationary and shears the rest of the image left/right
+    """
+    shear = np.radians(shear)
+    return np.array([[1, -1 * np.sin(shear), 0], [0, np.cos(shear), 0], [0, 0, 1]])
+
+
+def shift_matrix(x_shift=0, y_shift=0):
+    """Get the 3x3 translation transformation matrix
+
+    Parameters
+    ----------
+    x_shift: int
+        The number of pixels to shift the image towards the left (the default is 0)
+    y_shift: int
+        The number of pixels to shift the image upwards (the default is 0)
+    """
+    transform = np.eye(3, dtype=np.float32)
+    transform[0, 2] = x_shift
+    transform[1, 2] = y_shift
+    return transform
+
+
+def scaling_matrix(height=0, width=0, width_scale=1.0, height_scale=1.0):
+    """Get the 3x3 scaling transformation matrix
+
+    Parameters
+    ----------
+    height: int
+        The height of an input image (Set this to use a centered scaling) (the default is 0)
+    width: int
+        The width of an input image (set this to use a centered scaling) (the default is 0)
+    width_scale: float
+        The width scaling factor (1.5 = 1.5x wider image) (the default is 1.0)
+    height_scale: float
+        The height scaling factor (1.5 = 1.5x taller image) (the default is 1.0)
+    """
+    width_scale = 1 / width_scale
+    height_scale = 1 / height_scale
+    x_shift = (width * 0.5) * (1 - width_scale)
+    y_shift = (height * 0.5) * (1 - height_scale)
+    return np.array([[width_scale, 0, x_shift], [0, height_scale, y_shift], [0, 0, 1]])
+
+
+def flip_matrix(height, width, v_flip=False, h_flip=True):
+    """Get the 3x3 flip transformation matrix
+
+    Parameters
+    ----------
+    height: int
+        The height of the input image
+    width: int
+        The width of the input image
+    v_flip: bool
+        Whether to apply a vertical flip (the default is False)
+    h_flip: bool
+        Whether to apply a horizontal flip (the default is True)
+
+    Note
+    ----
+    Height and width are required, otherwise the image will be flipped along the axis and remain out of frame
+    """
+    transform = np.eye(3)
+    if h_flip:
+        transform[0, 0] = -1
+        transform[0, 2] = width
+    if v_flip:
+        transform[1, 1] = -1
+        transform[1, 2] = height
+    return transform
+
+
+def get_image_augmenter_v2(
+    image_height,
+    image_width,
+    augment_chance=[1.0, 0.5],
+    flip_h=False,
+    flip_v=False,
+    width_scaling=(1.0, 1.0),
+    height_scaling=(1.0, 1.0),
+    rotation_range=(0.0, 0.0),
+    shear_range=(0.0, 0.0),
+    x_shift=(0, 0),
+    y_shift=(0, 0),
+    brightness_range=(0.0, 0.0),
+    contrast_range=(1.0, 1.0),
+    random_distribution=np.random.uniform,
+    run_on_batch=True,
+    **kwargs
+):
+    """Get an augmentation function for TensorFlow pipelines
+
+    augment_chance: list
+        A list of probabilities for applying augments (ie: odds of the first augment being applied, odds of the second augment being applied if the first was applied, and so on) (the default is [1.0, 0.5])
+    flip_h: bool
+        Whether horizontal flips are allowed (the default is False)
+    flip_v: bool
+        Whether vertical flips are allowed (the default is False)
+    width_scaling: (float, float)
+        The minimum and maximum range to scale the width to (the default is (1.0, 1.0))
+    height_scaling: (float, float)
+        The minimum and maximum range to scale the height to (the default is (1.0, 1.0))
+    rotation_range: (float, float)
+        The minimum and maximum rotation in degrees that can be applied (the default is (0, 0))
+    shear_range: (float, float)
+        The minimum and maximum shear in degrees that can be applied (the default is (0, 0))
+    x_shift: (float, float)
+        The minimum and maximum pixels to shift left that can be applied (the default is (0, 0))
+    y_shift: (float, float)
+        The minimum and maximum pixels to shift upwards that can be applied (the default is (0, 0))
+    brightness_range: (float, float)
+        The minimum and maximum delta to apply to image brightness (the default is (0, 0))
+    contrast_range: (float, float)
+        The minimum and maximum factor to change image contrast by (the default is (1, 1))
+    random_distribution: function
+        The function for the random distribution to use for augmentation values (the default is numpy.random.uniform)
+    run_on_batch: bool
+        Whether the augment func will be called on batches (the default is True)
+
+    Notes
+    -----
+    All default values result in no change to the image. Only augmentations that can result in a change in the image will be drawn from when randomly applying augmentations.
+    Labels sent to the augmentation function are assumed to be label-maps with the same shape as the input image.
+    random_distribution assumes input in the form of random_distribution(min_val, max_val). It's main purpose is to allow seeded random generators rather than different distribution functions.
+    If a single value is passed for width_scaling, height_scaling, or contrast_range, the range becomes (1 - value, 1 + value).
+    If a single value is passed for rotation_range, shear_range, x_shift, y_shift, or brightness_range, the range becomes (-value, value).
+
+    """
+    rotation_range = np.radians(rotation_range)
+    shear_range = np.radians(shear_range)
+    if not hasattr(width_scaling, '__len__') or len(width_scaling) == 1:
+        width_scaling = (1 - width_scaling, 1 + width_scaling)
+    if not hasattr(height_scaling, '__len__') or len(height_scaling) == 1:
+        height_scaling = (1 - height_scaling, 1 + height_scaling)
+    if not hasattr(rotation_range, '__len__') or len(rotation_range) == 1:
+        rotation_range = (-rotation_range, rotation_range)
+    if not hasattr(shear_range, '__len__') or len(shear_range) == 1:
+        shear_range = (-shear_range, shear_range)
+    if not hasattr(x_shift, '__len__') or len(x_shift) == 1:
+        x_shift = (-x_shift, x_shift)
+    if not hasattr(y_shift, '__len__') or len(y_shift) == 1:
+        y_shift = (-y_shift, y_shift)
+    if not hasattr(brightness_range, '__len__') or len(brightness_range) == 1:
+        brightness_range = (-brightness_range, brightness_range)
+    if not hasattr(contrast_range, '__len__') or len(contrast_range) == 1:
+        contrast_range = (1 - contrast_range, 1 + contrast_range)
+
+    choices = []
+    if flip_h:
+        choices.append('flip_h')
+    if flip_v:
+        choices.append('flip_v')
+    if width_scaling[0] < 1.0 or width_scaling[1] > 1.0:
+        choices.append('width_scaling')
+    if height_scaling[0] < 1.0 or height_scaling[1] > 1.0:
+        choices.append('height_scaling')
+    if rotation_range[0] != 0 or rotation_range[1] != 0:
+        choices.append('rotation')
+    if shear_range[0] != 0 or shear_range[1] != 0:
+        choices.append('shear')
+    if x_shift[0] != 0 or x_shift[1] != 0:
+        choices.append('x_shift')
+    if y_shift[0] != 0 or y_shift[1] != 0:
+        choices.append('y_shift')
+    if brightness_range[0] < 0 or brightness_range[1] > 0:
+        choices.append('brightness')
+    if contrast_range[0] < 1.0 or contrast_range[1] > 1.0:
+        choices.append('contrast')
+
+    def augment_func(image, label=None):
+        # shape = tf.shape(image)
+        # if len(shape) == 4:
+        #     height, width = float(shape[1]), float(shape[2])
+        # elif len(shape) == 3:
+        #     height, width = float(shape[0]), float(shape[1])
+        # else:
+        #     raise ValueError('Image/Label must have shape [batch, height, width, channels] or [height, width, channels], not {}'.format(image.shape))
+        height = image_height
+        width = image_width
+        # print(shape, height, width)
+        # print(height.shape, width.shape)
+        transform = np.eye(3, dtype=np.float32)
+        affine_changed = False
+        num_choices = 0
+        for p in augment_chance:
+            if np.random.random() <= p:
+                num_choices += 1
+            else:
+                break
+        num_choices = min(num_choices, len(choices))
+        for augment in np.random.choice(choices, num_choices, replace=False):
+            if augment == 'flip_h':
+                transform = transform @ flip_matrix(height, width, False, True)
+                affine_changed = True
+            elif augment == 'flip_v':
+                transform = transform @ flip_matrix(height, width, True, False)
+                affine_changed = True
+            elif augment == 'width_scaling':
+                transform = transform @ scaling_matrix(height, width, random_distribution(*width_scaling), 1.0)
+                affine_changed = True
+            elif augment == 'height_scaling':
+                transform = transform @ scaling_matrix(height, width, 1.0, random_distribution(*height_scaling))
+                affine_changed = True
+            elif augment == 'rotation':
+                transform = transform @ rotation_matrix(width // 2, height // 2, random_distribution(*rotation_range))
+                affine_changed = True
+            elif augment == 'shear':
+                transform = transform @ shear_matrix(random_distribution(*shear_range))
+                affine_changed = True
+            elif augment == 'x_shift':
+                transform = transform @ shift_matrix(random_distribution(*x_shift), 0)
+                affine_changed = True
+            elif augment == 'y_shift':
+                transform = transform @ shift_matrix(0, random_distribution(*y_shift))
+                affine_changed = True
+            elif augment == 'brightness':
+                image = tf.image.adjust_brightness(image, random_distribution(*brightness_range))
+            elif augment == 'contrast':
+                image = tf.image.adjust_contrast(image, random_distribution(*contrast_range))
+            else:
+                raise ValueError("Unknown augmentation selected?")
+        if affine_changed:
+            transform = tf.cast(transform, tf.float32)
+            transform = matrices_to_flat_transforms(transform, invert=True)
+            image = tf_transform(image, transform, interpolation='BILINEAR')
+            if label is not None:
+                label = tf_transform(label, transform, interpolation='NEAREST')
+            if not run_on_batch:
+                image = image[0]
+                label = label[0]
+        return image, label
+    return augment_func
