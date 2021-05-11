@@ -8,6 +8,7 @@ def get_ignite_metric(metric_name):
     metric_lookup = {
         'mean': ignite.metrics.Average,
         'dice': TorchDice,
+        'rounding_accuracy': RoundingAccuracy
     }
     if metric_name.lower() not in metric_lookup:
         for item in ignite.metrics.__all__:
@@ -18,27 +19,37 @@ def get_ignite_metric(metric_name):
 
 
 class IgniteMetricWrapper(CoreMetricWrapper):
-    def __init__(self, metric, relevant_idx, name=None, logging_pattern="{:.4f}", as_percent=False, *metric_args, **metric_kwargs):
-        if name is None:
-            name = str(repr(metric)).split(' ')[0].split('.')[-1]
-        if isinstance(metric, str):
-            metric = get_ignite_metric(metric)(*metric_args, **metric_kwargs)
-        super().__init__(metric, relevant_idx, name, logging_pattern=logging_pattern, as_percent=as_percent)
-        self.metric = metric
+    def __init__(self, metric, relevant_idx, logging_prefix="", as_copy=False, log_pattern='{prefix}/{name}: {result:.4f}', as_percent=False, name=''):
+        if as_copy:
+            metric = type(metric)()
+        if not hasattr(relevant_idx, '__len__'):
+            relevant_idx = [relevant_idx]
+        super().__init__(metric, relevant_idx, logging_prefix=logging_prefix, log_pattern=log_pattern, as_percent=as_percent)
+        self.__name = name
+
+    @property
+    def name(self):
+        return self.__name
 
     def __call__(self, results):
-        test = [results[idx] for idx in self.relevant_idx]
-        if len(test) == 1:
-            self.metric.update(test[0])
+        result = [results[idx] for idx in self.relevant_idx]
+        if len(result) == 1:
+            self.metric.update(result[0])
         else:
-            self.metric.update(test)
-        # self.metric.update(*[results[idx] for idx in self.relevant_idx])
+            self.metric.update(result)
 
-    def reset_states(self):
+    def reset(self):
         self.metric.reset()
 
     def result(self):
         return self.metric.compute()
+
+    def copy(self, **kwargs):
+        copy_wrapper = IgniteMetricWrapper(self.metric, self.relevant_idx, self.logging_prefix, True, self.log_pattern, self.as_percent, self.name)
+        for key, value in kwargs:
+            if hasattr(copy_wrapper):
+                setattr(copy_wrapper, key, value)
+        return copy_wrapper
 
 
 class TorchDice(ignite.metrics.Metric):
