@@ -1,93 +1,119 @@
+import abc
 import importlib.util
 import warnings
 
 import numpy as np
-from .metrics import MetricWrapper
+from .metrics import CoreMetricWrapper
 
 if importlib.util.find_spec('tensorflow') is not None:
-    TF_METRICS = True
-    from .tensorflow_metrics import TensorFlowMetricWrapper
+    TF_AVAILABLE = True
+    from .tensorflow_metrics import TFMetricWrapper, get_tf_metric
 else:
-    TF_METRICS = False
+    TF_AVAILABLE = False
 if importlib.util.find_spec('ignite') is not None:
-    IGNITE_METRICS = True
-    from .ignite_metrics import IgniteMetricWrapper
+    IGNITE_AVAILABLE = True
+    from .ignite_metrics import IgniteMetricWrapper, get_ignite_metric
 else:
-    IGNITE_METRICS = False
+    IGNITE_AVAILABLE = False
 
 
-def num_digits(x):
-    if x == 0:
-        return 1
-    return int(np.ceil(np.log10(np.abs(x) + 1)))
+def find_num_digits(x):
+    return 1 if x == 0 else int(np.ceil(np.log10(np.abs(x) + 1)))
 
 
 class CoreLoggingHandler(object):
-    def __init__(self, train_metrics=None, val_metrics=None):
-        self.epochs = None
-        self.digits = None
-        if train_metrics is None:
-            self.train_metrics = []
+    def __init__(self, train_metrics=None, val_metrics=None, total_epochs=None):
+        train_metrics = [] if train_metrics is None else train_metrics
+        val_metrics = [] if val_metrics is None else val_metrics
+        self.total_epochs = total_epochs
+        if self.total_epochs is not None:
+            num_digits = str(find_num_digits(self.total_epochs))
+            self.prefix = 'Epoch {epoch:' + num_digits + 'd}/{total_epochs:' + num_digits + 'd}'
         else:
-            for metric in train_metrics:
-                if not issubclass(metric, MetricWrapper):
-                    raise ValueError("Metrics used to initialize logging handlers must be MetricWrapper objects")
-            self.train_metrics = train_metrics
-        if val_metrics is None:
-            self.val_metrics = []
-        else:
-            for metric in val_metrics:
-                if not issubclass(metric, MetricWrapper):
-                    raise ValueError("Metrics used to initialize logging handlers must be MetricWrapper objects")
-            self.val_matrics = val_metrics
+            self.prefix = 'Epoch {epoch:3d}'
+        for metric in train_metrics + val_metrics:
+            if not isinstance(metric, CoreMetricWrapper):
+                raise TypeError('Initializing metrics must be added as a subtype of CoreMetricWrapper objects')
+        self.train_metrics = train_metrics
+        self.val_metrics = val_metrics
 
-    def _get_log_string(self, prefix):
-        if isinstance(prefix, int):
-            epoch = prefix + 1  # Correct for 0 indexing
-            if self.digits is None and self.epochs is not None:
-                self.digits = str(num_digits(epoch)) if self.epochs is None else str(num_digits(self.epochs))
-            prefix = 'Epoch {:' + self.digits + 'd}'
-            prefix = prefix.format(epoch)
-            if self.epochs is not None:
-                prefix += '/{:' + self.digits + 'd} - '
-                prefix = prefix.format(self.epochs)
-        train_string = ', '.join([metric.log_string() for metric in self.train_metrics])
-        val_string = ', '.join([metric.log_string() for metric in self.val_metrics])
-        log_string = prefix + " " + ' || '.join([train_string, val_string])
+    def get_log_string(self, epoch):
+        prefix = self.prefix.format(epoch=epoch, total_epochs=self.total_epochs)
+        train_string = ', '.join([metric.get_log_string() for metric in self.train_metrics])
+        val_string = ', '.join([metric.get_log_string() for metric in self.val_metrics])
+        log_string = ' || '.join([prefix, train_string, val_string])
         return log_string
 
-    def add_metric(self, metric, relevant_idx, name=None, in_training=True, in_validation=True, as_tf=True, as_ignite=False):
-        if as_tf and not TF_METRICS:
-            as_tf = False
-            warnings.warn('A Tensorflow install cannot be found. "as_tf" flag set to False.')
-        if as_ignite and not IGNITE_METRICS:
-            as_ignite = False
-            warnings.warn('An Ignite install cannot be found. "as_ignite" flag set to False.')
-        if as_tf and as_ignite:
-            warnings.warn('Cannot use Tensorflow and Ignite as backends for the same metric. Defaulting to TensorFlow.')
-        elif not as_tf and not as_ignite:
-            raise ValueError('No valid metric backend was found. Please install either Pytorch Ignite or TensorFlow.')
-        elif as_tf:
-            MetricWrapper = TensorFlowMetricWrapper
-        elif as_ignite:
-            MetricWrapper = IgniteMetricWrapper
-        if not in_training and not in_validation:
-            raise ValueError("Metrics must be in either training or validation")
-        if in_training:
-            metric_name = name
-            if name is not None:
-                metric_name = 'Train_' + name if in_validation and 'train' not in name.lower() else name
-            self.train_metrics.append(MetricWrapper(metric, relevant_idx, name=metric_name))
-        if in_validation:
-            metric_name = name
-            if name is not None:
-                metric_name = 'Val_' + name if in_training and 'val' not in name.lower() else name
-            self.val_metrics.append(MetricWrapper(metric, relevant_idx, name=metric_name))
+    def add_metric(self,
+                   metric,
+                   relevant_idx,
+                   in_training=True,
+                   in_validation=True,
+                   as_tf=False,
+                   as_ignite=False,
+                   log_pattern='{prefix}/{name}: {result:.4f}',
+                   as_percent=False,
+                   metric_kwargs={}):
+        if isinstance(metric, str):
+            if as_tf and not TF_AVAILABLE:
+                as_tf = False
+                warnings.warn('A Tensorflow install cannot be found. "as_tf" flag set to False.')
+            if as_ignite and not IGNITE_AVAILABLE:
+                as_ignite = False
+                warnings.warn('An Ignite install cannot be found. "as_ignite" flag set to False.')
+            if as_tf and as_ignite:
+                warnings.warn('Cannot use both Tensorflow and Ignite as backends for the same metric. Defaulting to TensorFlow.')
+            if as_tf:
+                metric = get_tf_metric(metric, **metric_kwargs)
+            elif as_ignite:
+                metric = get_ignite_metric(metric)
+            else:
+                raise ValueError('No valid metric backend was found. Please install either Pytorch Ignite or TensorFlow.')
+        if isinstance(metric, CoreMetricWrapper):
+            if in_training and in_validation:
+                prefix = metric.logging_prefix
+                if prefix == '':
+                    metric.logging_prefix = 'Train'
+                self.train_metrics.append(metric)
+                self.val_metrics.append(metric.copy(logging_prefix='Val' + prefix))
+            elif in_training:
+                if metric.logging_prefix == '':
+                    metric.logging_prefix = 'Train'
+                self.train_metrics.append(metric)
+            elif in_validation:
+                if metric.logging_prefix == '':
+                    metric.logging_prefix = 'Val'
+                self.val_metrics.append(metric)
+        elif isinstance(metric, abc.ABCMeta) and "class 'tensorflow" in str(metric).lower():
+            # a keras metric class
+            if in_training:
+                self.train_metrics.append(TFMetricWrapper(metric(**metric_kwargs), relevant_idx, logging_prefix='Train', log_pattern=log_pattern, as_percent=as_percent))
+            if in_validation:
+                self.val_metrics.append(TFMetricWrapper(metric(**metric_kwargs), relevant_idx, logging_prefix='Val', log_pattern=log_pattern, as_percent=as_percent))
+        elif ('keras.metrics' in str(metric) or 'tensorflow_metrics' in str(metric)) and 'object' in str(metric):
+            # a keras metric object
+            if in_training:
+                self.train_metrics.append(TFMetricWrapper(metric, relevant_idx, logging_prefix='Train', log_pattern=log_pattern, as_percent=as_percent))
+            if in_validation:
+                self.val_metrics.append(TFMetricWrapper(metric, relevant_idx, logging_prefix='Val', as_copy=in_training, log_pattern=log_pattern, as_percent=as_percent))
+        elif isinstance(metric, abc.ABCMeta) and "class 'ignite" in str(metric).lower():
+            if 'name' in metric_kwargs:
+                metric_name = metric_kwargs['name']
+                del metric_kwargs['name']
+            else:
+                metric_name = str(type(metric)).rsplit('.', 1)[1][:-2]
+            if in_training:
+                self.train_metrics.append(IgniteMetricWrapper(metric(**metric_kwargs), relevant_idx, logging_prefix='Train', log_pattern=log_pattern, as_percent=as_percent, name=metric_name))
+            if in_validation:
+                self.val_metrics.append(IgniteMetricWrapper(metric(**metric_kwargs), relevant_idx, logging_prefix='Val', log_pattern=log_pattern, as_percent=as_percent, name=metric_name))
+            #TODO - add ignite metrics
+            raise NotImplementedError("Working on it...")
+            IgniteMetricWrapper()
 
-    def start(self, logdir, total_epochs=None):
-        self.epochs = total_epochs
+    def start(self, logdir):
+        raise NotImplementedError("A derived class should implement start()")
 
-    def write(self, prefix):
+    def write(self, prefix, reset=False):
         raise NotImplementedError("A derived class should implement write()")
 
     def train_step(self, results):

@@ -5,9 +5,6 @@ os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
 
 try:  # Any code that relies on tensorflow
     import tensorflow as tf
-    gpu_devices = tf.config.experimental.list_physical_devices('GPU')
-    for device in gpu_devices:
-        tf.config.experimental.set_memory_growth(device, True)
     from .model_arch import get_model_func
     from .losses import get_loss_func
     from .learning_rates import get_lr_func
@@ -16,6 +13,15 @@ try:  # Any code that relies on tensorflow
     from .multi_model import MultiModel
 except ImportError:
     warnings.warn("Valid TensorFlow install not found. Some options will not be available.")
+
+try:
+    gpu_devices = tf.config.experimental.list_physical_devices('GPU')
+    for device in gpu_devices:
+        tf.config.experimental.set_memory_growth(device, True)
+except NameError:
+    pass  # TF isn't imported, handled by previous try/except
+except RuntimeError as e:
+    warnings.warn(e.args[0], category=RuntimeWarning)
 
 try:
     from .Logging import TensorboardLoggingHandler, FileLoggingHandler

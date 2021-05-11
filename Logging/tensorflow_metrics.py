@@ -1,44 +1,46 @@
-import abc
 import tensorflow as tf
-from .metrics import MetricWrapper
+from .metrics import CoreMetricWrapper
 
 
-def get_metric(metric_name):
+def get_tf_metric(metric_name, **metric_kwargs):
     metric_lookup = {
-        'loss': tf.keras.metrics.Mean,
-        'accuracy': tf.keras.metrics.BinaryAccuracy,
-        'recall': tf.keras.metrics.Recall,
-        'precision': tf.keras.metrics.Precision,
         'balance': BalanceScore,
         'mcc': MatthewsCorrelationCoefficient,
         'dice': ScalarDiceScore,
         'bool_dice': BooleanDiceScore,
-        'auc': tf.keras.metrics.AUC,
     }
-    if metric_name not in metric_lookup:
-        raise ValueError("Unknown metric name: {}".format(metric_name))
-    return metric_lookup[metric_name]
+    if metric_name.lower() not in metric_lookup:
+        return tf.keras.metrics.get({"class_name": metric_name, "config": metric_kwargs})
+    return metric_lookup[metric_name.lower()](**metric_kwargs)
 
 
-class TensorFlowMetricWrapper(MetricWrapper):
-    def __init__(self, metric, relevant_idx, logging_pattern="{:.4f}", as_percent=False, *metric_args, **metric_kwargs):
-        if isinstance(metric, str):
-            self.metric = get_metric(metric)(*metric_args, **metric_kwargs)
-        elif isinstance(metric, tf.keras.metrics.Metric):
-            raise ValueError('Please use a metric function rather than an initialized metric')
-            # self.metric = metric
-        elif isinstance(metric, abc.ABCMeta):
-            self.metric = metric(*metric_args, **metric_kwargs)
-        super().__init__(metric, self.metric.name, relevant_idx, logging_pattern=logging_pattern, as_percent=as_percent)
+class TFMetricWrapper(CoreMetricWrapper):
+    def __init__(self, metric, relevant_idx, logging_prefix="", as_copy=False, log_pattern='{prefix}/{name}: {result:.4f}', as_percent=False):
+        if as_copy:
+            metric = tf.keras.metrics.deserialize(tf.keras.metrics.serialize(metric))
+        if not hasattr(relevant_idx, '__len__'):
+            relevant_idx = [relevant_idx]
+        super().__init__(metric, relevant_idx, logging_prefix=logging_prefix, log_pattern=log_pattern, as_percent=as_percent)
 
     def __call__(self, results):
         self.metric(*[tf.squeeze(results[idx]) for idx in self.relevant_idx])
 
-    def reset_states(self):
+    def reset(self):
         self.metric.reset_states()
 
     def result(self):
         return self.metric.result()
+
+    @property
+    def name(self):
+        return self.metric.name
+
+    def copy(self, **kwargs):
+        copy_wrapper = TFMetricWrapper(self.metric, self.relevant_idx, self.logging_prefix, as_copy=True)
+        for key, value in kwargs:
+            if hasattr(copy_wrapper, key):
+                setattr(copy_wrapper, key, value)
+        return copy_wrapper
 
 
 @tf.keras.utils.register_keras_serializable(package='TF_Toolkit')

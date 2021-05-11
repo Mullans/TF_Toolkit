@@ -1,30 +1,28 @@
 import os
-import tensorboard as tb
+import tensorflow as tf
 
 from .core_logger import CoreLoggingHandler, num_digits
 
 
 class TensorboardLoggingHandler(CoreLoggingHandler):
-
-    def write(self, prefix):
-        epoch = prefix
-        log_string = self._get_log_string(prefix)
+    def write(self, epoch, reset=True):
+        log_string = self.get_log_string(epoch)
         if isinstance(epoch, str):
             epoch = 0
         with self.train_writer.as_default():
             for metric in self.train_metrics:
-                tb.summary.scalar(metric.name, metric.result(), step=epoch)
+                tf.summary.scalar(metric.name, metric.result(), step=epoch)  # TODO - make generic
         with self.val_writer.as_default():
             for metric in self.val_metrics:
-                tb.summary.scalar(metric.name, metric.result(), step=epoch)
-        for metric in self.train_metrics + self.val_metrics:
-            metric.reset_states()
+                tf.summary.scalar(metric.name, metric.result(), step=epoch)  # TODO - make generic
+        if reset:
+            for metric in self.train_metrics + self.val_metrics:
+                metric.reset_states()
         return log_string
 
-    def start(self, logdir, total_epochs=None):
-        super(TensorboardLoggingHandler, self).start(logdir, total_epochs=total_epochs)
-        self.train_writer = tb.summary.create_file_writer(os.path.join(logdir, 'train'))
-        self.val_writer = tb.summary.create_file_writer(os.path.join(logdir, 'val'))
+    def start(self, logdir):
+        self.train_writer = tf.summary.create_file_writer(os.path.join(logdir, 'train'))  # TODO - make generic
+        self.val_writer = tf.summary.create_file_writer(os.path.join(logdir, 'val'))  # TODO - make generic
         if self.epochs is not None:
             self.digits = str(num_digits(self.epochs))
 
