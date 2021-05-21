@@ -1,7 +1,7 @@
 import os
 import tensorflow as tf
 
-from .core_logger import CoreLoggingHandler, num_digits
+from .core_logger import CoreLoggingHandler, find_num_digits
 
 
 class TensorboardLoggingHandler(CoreLoggingHandler):
@@ -21,10 +21,13 @@ class TensorboardLoggingHandler(CoreLoggingHandler):
         return log_string
 
     def start(self, logdir):
+        # torch.utils.tensorboard.SummaryWriter
+        # writer.add_scalar('Name', value, epoch)
+        # writer.flush(), writer.close()
         self.train_writer = tf.summary.create_file_writer(os.path.join(logdir, 'train'))  # TODO - make generic
         self.val_writer = tf.summary.create_file_writer(os.path.join(logdir, 'val'))  # TODO - make generic
         if self.epochs is not None:
-            self.digits = str(num_digits(self.epochs))
+            self.digits = str(find_num_digits(self.epochs))
 
     def interrupt(self):
         pass
