@@ -42,6 +42,7 @@ class CoreModel(object):
             'model_group': model_group,
             'train_step': 'default',
             'val_step': 'default',
+            'sample_step': None,
             'loss_type': None,
             'lr_type': 'base',
             'model_func': None
@@ -232,8 +233,17 @@ class CoreModel(object):
     def val_step(self, val_step):
         self.model_args['val_step'] = val_step
 
-    def summary(self, **kwargs):
-        return self.model.summary(**kwargs)
+    @property
+    def layers(self):
+        if self.model is None:
+            return None
+        return self.model.layers
+
+    def __getattr__(self, attr):
+        """Use TF model parameters if this class doesn't have it - subclass without subclassing"""
+        if self.model is not None and hasattr(self.model, attr):
+            return getattr(self.model, attr)
+        raise AttributeError("'CoreModel' object has no attribute '{}'".format(attr))
 
     def num_parameters(self):
         total = 0
@@ -275,6 +285,7 @@ class CoreModel(object):
               epochs=50,
               save_every=10,
               load_args=False,
+              sample_callback=None,
               version='default',
               **kwargs):
         log_dir = gouda.ensure_dir(self.model_dir(version))
@@ -380,6 +391,8 @@ class CoreModel(object):
                     train_pbar.update(batch_size)
                     train_step(item)
                 train_pbar.close()
+                if sample_callback is not None:
+                    sample_callback(self.model, epoch)
                 val_pbar = tqdm.tqdm(total=val_counter(), leave=False)
                 for item in val_data:
                     batch_size = item[0].shape[0]
