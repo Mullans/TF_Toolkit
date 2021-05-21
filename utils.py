@@ -660,6 +660,9 @@ def get_image_augmenter_v2(
                 label = tf_transform(label, transform, interpolation='NEAREST')
             if not run_on_batch:
                 image = image[0]
-                label = label[0]
-        return image, label
+                if label is not None:
+                    label = label[0]
+        if label is not None:
+            return image, label
+        return image
     return augment_func
