@@ -4,6 +4,7 @@ import numpy as np
 from scipy import ndimage
 import skimage.transform
 import skimage.segmentation
+import tensorflow as tf
 
 
 def resize(image, output_shape, method='fast', anti_aliasing=False):
@@ -159,3 +160,17 @@ def gaussian_blur(image, sigma):
     if sigma == 0:
         return image
     return ndimage.gaussian_filter(image, sigma=[sigma, sigma, 0], mode='constant')
+
+
+def tf_rescale(image, keep_sign=False):
+    if keep_sign:
+        sign = tf.sign(image)
+        image = tf.abs(image)
+    min_pix = tf.reduce_min(image)
+    max_pix = tf.reduce_max(image)
+    if max_pix == min_pix:
+        return tf.zeros(image.shape)
+    image = (image - min_pix) / (max_pix - min_pix)
+    if keep_sign:
+        image = image * sign
+    return image
