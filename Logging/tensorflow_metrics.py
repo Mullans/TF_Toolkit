@@ -4,13 +4,14 @@ from .metrics import CoreMetricWrapper
 
 def get_tf_metric(metric_name, **metric_kwargs):
     metric_lookup = {
+        'loss': tf.keras.metrics.Mean,
         'balance': BalanceScore,
         'mcc': MatthewsCorrelationCoefficient,
         'dice': ScalarDiceScore,
         'bool_dice': BooleanDiceScore,
     }
     if metric_name.lower() not in metric_lookup:
-        return tf.keras.metrics.get({"class_name": metric_name, "config": metric_kwargs})
+        return tf.keras.metrics.get({"class_name": metric_name.title(), "config": metric_kwargs})
     return metric_lookup[metric_name.lower()](**metric_kwargs)
 
 

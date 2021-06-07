@@ -22,7 +22,7 @@ def find_num_digits(x):
 
 
 class CoreLoggingHandler(object):
-    def __init__(self, train_metrics=None, val_metrics=None, total_epochs=None):
+    def __init__(self, train_metrics=None, val_metrics=None, total_epochs=None, use_tf=None, use_ignite=None):
         train_metrics = [] if train_metrics is None else train_metrics
         val_metrics = [] if val_metrics is None else val_metrics
         self.total_epochs = total_epochs
@@ -36,6 +36,8 @@ class CoreLoggingHandler(object):
                 raise TypeError('Initializing metrics must be added as a subtype of CoreMetricWrapper objects')
         self.train_metrics = train_metrics
         self.val_metrics = val_metrics
+        self.use_tf = use_tf
+        self.use_ignite = use_ignite
 
     def get_log_string(self, epoch):
         prefix = self.prefix.format(epoch=epoch, total_epochs=self.total_epochs)
@@ -49,11 +51,15 @@ class CoreLoggingHandler(object):
                    relevant_idx,
                    in_training=True,
                    in_validation=True,
-                   as_tf=False,
-                   as_ignite=False,
+                   as_tf=None,
+                   as_ignite=None,
                    log_pattern='{prefix}/{name}: {result:.4f}',
                    as_percent=False,
                    metric_kwargs={}):
+        # TODO - in hindsight, probably move this to subclasses...
+        # TODO - add metric name as an optional kwarg? makes it easier to use
+        as_tf = self.use_tf if as_tf is None else as_tf
+        as_ignite = self.use_ignite if as_ignite is None else as_ignite
         if isinstance(metric, str):
             if as_tf and not TF_AVAILABLE:
                 as_tf = False

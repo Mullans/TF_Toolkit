@@ -17,17 +17,22 @@ class TensorboardLoggingHandler(CoreLoggingHandler):
                 tf.summary.scalar(metric.name, metric.result(), step=epoch)  # TODO - make generic
         if reset:
             for metric in self.train_metrics + self.val_metrics:
-                metric.reset_states()
+                metric.reset()
         return log_string
 
-    def start(self, logdir):
+    def start(self, logdir, total_epochs=None):
         # torch.utils.tensorboard.SummaryWriter
         # writer.add_scalar('Name', value, epoch)
         # writer.flush(), writer.close()
+        if total_epochs is not None:
+            self.total_epochs = total_epochs
+            num_digits = str(find_num_digits(self.total_epochs))
+            self.prefix = 'Epoch {epoch:' + num_digits + '}/{total_epochs:' + num_digits + 'd}'
+            print(total_epochs)
         self.train_writer = tf.summary.create_file_writer(os.path.join(logdir, 'train'))  # TODO - make generic
         self.val_writer = tf.summary.create_file_writer(os.path.join(logdir, 'val'))  # TODO - make generic
-        if self.epochs is not None:
-            self.digits = str(find_num_digits(self.epochs))
+        # if self.epochs is not None:
+        #     self.digits = str(find_num_digits(self.epochs))
 
     def interrupt(self):
         pass

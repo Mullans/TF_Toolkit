@@ -522,7 +522,7 @@ def segnet_3d(input_shape=(8, 256, 256, 1), output_classes=2, filter_scale=0, at
 
     # Mid Flow
     layer6 = conv_layer3d(layer5b, 2 ** (filter_scale + 6), strides=(1, 1, 1), name='conv6')
-    layer6b = conv_layer3d(layer6, 2 ** (filter_scale + 5), strides=(1, 1, 1), name='conv6b')
+    # layer6b = conv_layer3d(layer6, 2 ** (filter_scale + 5), strides=(1, 1, 1), name='conv6b')
 
     # Decoder
     layer7 = deconv_layer3d(layer6, 2 ** (filter_scale + 5), strides=(2, 2, 2), name='deconv7')
