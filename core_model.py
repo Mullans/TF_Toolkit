@@ -177,6 +177,8 @@ class CoreModel(object):
                 raise ValueError("No saved weights found for version `{}`".format(version))
         if isinstance(path, os.PathLike):
             path = str(path)
+        if path.endswith('.index'):
+            path = path.replace('.index', '')
         self.model.load_weights(path)
 
     def save_weights(self, path):

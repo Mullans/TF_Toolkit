@@ -11,6 +11,7 @@ try:  # Any code that relies on tensorflow
     from .train_functions import get_update_step
     from .core_model import CoreModel
     from .multi_model import MultiModel
+    from .utils import enforce_4D
 except ImportError:
     warnings.warn("Valid TensorFlow install not found. Some options will not be available.")
 

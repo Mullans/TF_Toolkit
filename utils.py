@@ -139,12 +139,12 @@ def tf_transform(images, transforms, interpolation='NEAREST', output_shape=None,
                 "transforms should have rank 1 or 2, but got rank %d"
                 % len(transforms.get_shape())
             )
-
         output = tf.raw_ops.ImageProjectiveTransformV2(
             images=images,
             transforms=transforms,
             output_shape=tf.shape(images)[1:3],
             interpolation=interpolation.upper(),
+            fill_mode='CONSTANT'
         )
         return output
 
@@ -503,6 +503,10 @@ def flip_matrix(height, width, v_flip=False, h_flip=True):
     return transform
 
 
+def _quick_random(vals):
+    return tf.random.uniform([], minval=vals[0], maxval=vals[1])
+
+
 def get_image_augmenter_v2(
     image_height,
     image_width,
@@ -519,6 +523,7 @@ def get_image_augmenter_v2(
     contrast_range=(1.0, 1.0),
     random_distribution=np.random.uniform,
     run_on_batch=True,
+    as_tf_pyfunc=False,
     **kwargs
 ):
     """Get an augmentation function for TensorFlow pipelines
@@ -559,8 +564,8 @@ def get_image_augmenter_v2(
     If a single value is passed for rotation_range, shear_range, x_shift, y_shift, or brightness_range, the range becomes (-value, value).
 
     """
-    rotation_range = np.radians(rotation_range)
-    shear_range = np.radians(shear_range)
+    # rotation_range = np.radians(rotation_range)  # removed - convert to radians later
+    # shear_range = np.radians(shear_range)  # removed - convert to radians later
     if not hasattr(width_scaling, '__len__') or len(width_scaling) == 1:
         width_scaling = (1 - width_scaling, 1 + width_scaling)
     if not hasattr(height_scaling, '__len__') or len(height_scaling) == 1:
@@ -599,6 +604,8 @@ def get_image_augmenter_v2(
         choices.append('brightness')
     if contrast_range[0] < 1.0 or contrast_range[1] > 1.0:
         choices.append('contrast')
+    max_choices = len(choices)
+    augment_chance = np.array(augment_chance)
 
     def augment_func(image, label=None):
         # shape = tf.shape(image)
@@ -612,15 +619,16 @@ def get_image_augmenter_v2(
         width = image_width
         # print(shape, height, width)
         # print(height.shape, width.shape)
-        transform = np.eye(3, dtype=np.float32)
+        transform = tf.eye(3, dtype=tf.float32)
         affine_changed = False
-        num_choices = 0
-        for p in augment_chance:
-            if np.random.random() <= p:
-                num_choices += 1
-            else:
-                break
-        num_choices = min(num_choices, len(choices))
+        # num_choices = 0
+        # for p in augment_chance:
+        #     if tf.random.uniform([], 0, 1) <= p:
+        #         num_choices += 1
+        #     else:
+        #         break
+        num_choices = tf.math.count_nonzero(tf.random.uniform(augment_chance.shape, 0, 1) < augment_chance)
+        num_choices = tf.minimum(num_choices, max_choices)
         for augment in np.random.choice(choices, num_choices, replace=False):
             if augment == 'flip_h':
                 transform = transform @ flip_matrix(height, width, False, True)
@@ -629,27 +637,27 @@ def get_image_augmenter_v2(
                 transform = transform @ flip_matrix(height, width, True, False)
                 affine_changed = True
             elif augment == 'width_scaling':
-                transform = transform @ scaling_matrix(height, width, random_distribution(*width_scaling), 1.0)
+                transform = transform @ scaling_matrix(height, width, _quick_random(width_scaling), 1.0)
                 affine_changed = True
             elif augment == 'height_scaling':
-                transform = transform @ scaling_matrix(height, width, 1.0, random_distribution(*height_scaling))
+                transform = transform @ scaling_matrix(height, width, 1.0, _quick_random(height_scaling))
                 affine_changed = True
             elif augment == 'rotation':
-                transform = transform @ rotation_matrix(width // 2, height // 2, random_distribution(*rotation_range))
+                transform = transform @ rotation_matrix(width // 2, height // 2, _quick_random(rotation_range))
                 affine_changed = True
             elif augment == 'shear':
-                transform = transform @ shear_matrix(random_distribution(*shear_range))
+                transform = transform @ shear_matrix(_quick_random(shear_range))
                 affine_changed = True
             elif augment == 'x_shift':
-                transform = transform @ shift_matrix(random_distribution(*x_shift), 0)
+                transform = transform @ shift_matrix(_quick_random(x_shift), 0)
                 affine_changed = True
             elif augment == 'y_shift':
-                transform = transform @ shift_matrix(0, random_distribution(*y_shift))
+                transform = transform @ shift_matrix(0, _quick_random(y_shift))
                 affine_changed = True
             elif augment == 'brightness':
-                image = tf.image.adjust_brightness(image, random_distribution(*brightness_range))
+                image = tf.image.adjust_brightness(image, _quick_random(brightness_range))
             elif augment == 'contrast':
-                image = tf.image.adjust_contrast(image, random_distribution(*contrast_range))
+                image = tf.image.adjust_contrast(image, _quick_random(contrast_range))
             else:
                 raise ValueError("Unknown augmentation selected?")
         if affine_changed:
@@ -665,4 +673,8 @@ def get_image_augmenter_v2(
         if label is not None:
             return image, label
         return image
+    if as_tf_pyfunc:
+        def tf_augment(image, label=None):
+            return tf.py_function(func=augment_func, inp=[image, label], Tout=(tf.float32, tf.float32))
+        return tf_augment
     return augment_func
