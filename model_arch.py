@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow.keras import Input, Model
 from tensorflow.keras.layers import (Activation, BatchNormalization, Concatenate, Conv2D, Conv3D, Conv2DTranspose, Conv3DTranspose, Dense, Dropout, Flatten, GlobalAveragePooling2D, GlobalAveragePooling3D, MaxPooling3D, LeakyReLU, Multiply, ReLU, DepthwiseConv2D, AveragePooling2D, Softmax)
+from tensorflow.keras.regularizers import L2
 
 
 # Layer Definitions
@@ -13,8 +14,15 @@ def dense_layer(layer_input, nodes, batchnorm=True, activation=ReLU, name='dense
     return dense
 
 
-def conv_layer(layer_input, filters, kernel=(3, 3), strides=(2, 2), padding='same', use_bias=True, batchnorm=True, activation=ReLU, name='conv'):
-    conv = Conv2D(filters, kernel, strides=strides, padding=padding, use_bias=use_bias, name=name)(layer_input)
+def conv_layer(layer_input, filters, kernel=(3, 3), strides=(2, 2), padding='same', use_bias=True, batchnorm=True, regularize=False, activation=ReLU, name='conv'):
+    regularize_weight = 1e-4 if isinstance(regularize, bool) else regularize
+    conv = Conv2D(filters,
+                  kernel,
+                  strides=strides,
+                  padding=padding,
+                  use_bias=use_bias,
+                  kernel_regularizer=L2(regularize_weight) if regularize else None,
+                  name=name)(layer_input)
     if batchnorm:
         conv = BatchNormalization(name=name + '/bn')(conv)
     if activation is not None:
