@@ -31,7 +31,7 @@ class CoreModel(object):
                  model_name='default',
                  project_dir=None,
                  load_args=False,
-                 distributed=False,
+                 # distributed=False,
                  **kwargs):
         if project_dir is None:
             # Generally the location the code is called from
@@ -50,7 +50,7 @@ class CoreModel(object):
         for key in kwargs:
             self.model_args[key] = kwargs[key]
 
-        self.is_distributed = distributed
+        # self.is_distributed = distributed
         self.model = None
 
         self.results_dir = gouda.GoudaPath(os.path.join(project_dir, 'Results'))
@@ -418,135 +418,135 @@ class CoreModel(object):
         self.save_weights(log_dir('model_weights.tf').abspath)
         logging_handler.stop()
 
-    def train_distributed(self,
-                          train_data,
-                          val_data,
-                          logging_handler,
-                          starting_epoch=1,
-                          lr_type=None,
-                          loss_type=None,
-                          epochs=50,
-                          save_every=10,
-                          load_args=False,
-                          version='default',
-                          **kwargs):
-        """https://www.tensorflow.org/tutorials/distribute/custom_training#training_loop"""
-        raise NotImplementedError("This is still under construction. Need to figure out how loss works.")
-
-        log_dir = gouda.ensure_dir(self.model_dir(version))
-        args_path = log_dir('distributed_training_args.json')
-        weights_dir = gouda.ensure_dir(log_dir('distributed_training_weights'))
-
-        train_args = {'epochs': epochs, 'lr_type': lr_type, 'loss_type': loss_type}
-        for key in kwargs:
-            train_args[key] = kwargs[key]
-        if load_args:
-            if args_path.exists():
-                train_args = gouda.load_json(args_path)
-            else:
-                raise ValueError("No training args file found at `{}`".format(args_path.abspath))
-        for item in train_data.take(1):
-            train_args['batch_size'] = item[0].numpy().shape[0]
-        for item in val_data.take(1):
-            train_args['val_batch_size'] = item[0].numpy().shape[0]
-
-        lr = get_lr_func(train_args['lr_type'])(**train_args)
-
-        strategy = tf.distribute.MirroredStrategy()
-        with strategy.scope():
-            self.compile_model()
-            optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
-            logging_handler.start(log_dir, total_epochs=epochs)
-            # loss = get_loss_func(train_args['loss_type'])(reduction='none', **train_args)
-            # loss_object = tf.keras.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
-
-            # def distributed_loss(y_true, y_pred):
-            #     # example_loss = loss(y_true, y_pred)
-            #     # return tf.nn.compute_average_loss(example_loss, global_batch_size=train_args['batch_size'])
-            #     example_loss = loss_object(y_true, y_pred)
-            #     # example_loss = tf.keras.losses.binary_crossentropy(y_true, tf.expand_dims(y_pred, 1))
-            #     return tf.nn.compute_average_loss(example_loss, global_batch_size=train_args['batch_size'])
-            loss_object = tf.keras.losses.BinaryCrossentropy(
-                from_logits=True,
-                reduction='none')
-
-            def distributed_loss(labels, predictions):
-                per_example_loss = loss_object(labels, predictions)
-                return tf.nn.compute_average_loss(per_example_loss, global_batch_size=32)
-
-        if starting_epoch == 1:
-            self.model.save_weights(weights_dir('model_weights_init.tf').abspath)
-
-        train_counter = StableCounter()
-        if 'train_steps' in train_args:
-            train_counter.set(train_args['train_steps'])
-        val_counter = StableCounter()
-        if 'val_steps' in train_args:
-            val_counter.set(train_args['val_steps'])
-
-        train_step = self.train_step(self.model, optimizer, distributed_loss, logging_handler, batch_size=train_args['batch_size'])
-        val_step = self.val_step(self.model, distributed_loss, logging_handler, batch_size=train_args['batch_size'])
-
-        @tf.function
-        def distributed_train_step(inputs):
-            strategy.experimental_run_v2(train_step, args=(inputs, ))
-
-        @tf.function
-        def distributed_val_step(inputs):
-            strategy.experimental_run_v2(val_step, args=(inputs, ))
-
-        train_data = strategy.experimental_distribute_dataset(train_data)
-        val_data = strategy.experimental_distribute_dataset(val_data)
-
-        epoch_pbar = tqdm.tqdm(total=epochs, unit=' epochs', initial=starting_epoch - 1)
-        val_pbar = tqdm.tqdm(total=val_counter(), unit=' val samples', leave=False)
-        try:
-            for item in val_data:
-                distributed_val_step(item)
-                batch_size = train_args['val_batch_size']
-                val_counter += batch_size
-                val_pbar.update(batch_size)
-            log_string = logging_handler.write('Pretrained')
-            epoch_pbar.write(log_string)
-            val_counter.stop()
-        except KeyboardInterrupt:
-            if 'val_steps' not in train_args:
-                val_counter.reset()
-            logging_handler.write("Skipping pre-training validation.")
-        epoch_pbar.update(1)
-        val_pbar.close()
-
-        try:
-            epoch_digits = str(gouda.num_digits(epochs))
-            for epoch in range(starting_epoch, epochs):
-                train_pbar = tqdm.tqdm(total=train_counter(), unit=' samples', leave=False)
-                for item in train_data:
-                    batch_size = train_args['batch_size']
-                    train_counter += batch_size
-                    train_pbar.update(batch_size)
-                    distributed_train_step(item)
-                train_pbar.close()
-                val_pbar = tqdm.tqdm(total=val_counter(), leave=False)
-                for item in val_data:
-                    batch_size = train_args['val_batch_size']
-                    val_counter += batch_size
-                    val_pbar.update(batch_size)
-                    distributed_val_step(item)
-                val_pbar.close()
-                train_counter.stop()
-                val_counter.stop()
-                log_string = logging_handler.write(epoch)
-                epoch_pbar.write(log_string)
-                epoch_pbar.update(1)
-                if (epoch + 1) % 10 == 0:
-                    weight_string = 'model_weights_e{:0' + epoch_digits + 'd}.tf'
-                    self.model.save_weights(weights_dir(weight_string.format(epoch)).abspath)
-
-        except KeyboardInterrupt:
-            logging_handler.interrupt()
-        self.model.save_weights(log_dir('model_weights.tf').abspath)
-        logging_handler.stop()
-        epoch_pbar.close()
+    # def train_distributed(self,
+    #                       train_data,
+    #                       val_data,
+    #                       logging_handler,
+    #                       starting_epoch=1,
+    #                       lr_type=None,
+    #                       loss_type=None,
+    #                       epochs=50,
+    #                       save_every=10,
+    #                       load_args=False,
+    #                       version='default',
+    #                       **kwargs):
+    #     """https://www.tensorflow.org/tutorials/distribute/custom_training#training_loop"""
+    #     raise NotImplementedError("This is still under construction. Need to figure out how loss works.")
+    #
+    #     log_dir = gouda.ensure_dir(self.model_dir(version))
+    #     args_path = log_dir('distributed_training_args.json')
+    #     weights_dir = gouda.ensure_dir(log_dir('distributed_training_weights'))
+    #
+    #     train_args = {'epochs': epochs, 'lr_type': lr_type, 'loss_type': loss_type}
+    #     for key in kwargs:
+    #         train_args[key] = kwargs[key]
+    #     if load_args:
+    #         if args_path.exists():
+    #             train_args = gouda.load_json(args_path)
+    #         else:
+    #             raise ValueError("No training args file found at `{}`".format(args_path.abspath))
+    #     for item in train_data.take(1):
+    #         train_args['batch_size'] = item[0].numpy().shape[0]
+    #     for item in val_data.take(1):
+    #         train_args['val_batch_size'] = item[0].numpy().shape[0]
+    #
+    #     lr = get_lr_func(train_args['lr_type'])(**train_args)
+    #
+    #     strategy = tf.distribute.MirroredStrategy()
+    #     with strategy.scope():
+    #         self.compile_model()
+    #         optimizer = tf.keras.optimizers.Adam(learning_rate=lr)
+    #         logging_handler.start(log_dir, total_epochs=epochs)
+    #         # loss = get_loss_func(train_args['loss_type'])(reduction='none', **train_args)
+    #         # loss_object = tf.keras.losses.BinaryCrossentropy(reduction=tf.keras.losses.Reduction.NONE)
+    #
+    #         # def distributed_loss(y_true, y_pred):
+    #         #     # example_loss = loss(y_true, y_pred)
+    #         #     # return tf.nn.compute_average_loss(example_loss, global_batch_size=train_args['batch_size'])
+    #         #     example_loss = loss_object(y_true, y_pred)
+    #         #     # example_loss = tf.keras.losses.binary_crossentropy(y_true, tf.expand_dims(y_pred, 1))
+    #         #     return tf.nn.compute_average_loss(example_loss, global_batch_size=train_args['batch_size'])
+    #         loss_object = tf.keras.losses.BinaryCrossentropy(
+    #             from_logits=True,
+    #             reduction='none')
+    #
+    #         def distributed_loss(labels, predictions):
+    #             per_example_loss = loss_object(labels, predictions)
+    #             return tf.nn.compute_average_loss(per_example_loss, global_batch_size=32)
+    #
+    #     if starting_epoch == 1:
+    #         self.model.save_weights(weights_dir('model_weights_init.tf').abspath)
+    #
+    #     train_counter = StableCounter()
+    #     if 'train_steps' in train_args:
+    #         train_counter.set(train_args['train_steps'])
+    #     val_counter = StableCounter()
+    #     if 'val_steps' in train_args:
+    #         val_counter.set(train_args['val_steps'])
+    #
+    #     train_step = self.train_step(self.model, optimizer, distributed_loss, logging_handler, batch_size=train_args['batch_size'])
+    #     val_step = self.val_step(self.model, distributed_loss, logging_handler, batch_size=train_args['batch_size'])
+    #
+    #     @tf.function
+    #     def distributed_train_step(inputs):
+    #         strategy.experimental_run_v2(train_step, args=(inputs, ))
+    #
+    #     @tf.function
+    #     def distributed_val_step(inputs):
+    #         strategy.experimental_run_v2(val_step, args=(inputs, ))
+    #
+    #     train_data = strategy.experimental_distribute_dataset(train_data)
+    #     val_data = strategy.experimental_distribute_dataset(val_data)
+    #
+    #     epoch_pbar = tqdm.tqdm(total=epochs, unit=' epochs', initial=starting_epoch - 1)
+    #     val_pbar = tqdm.tqdm(total=val_counter(), unit=' val samples', leave=False)
+    #     try:
+    #         for item in val_data:
+    #             distributed_val_step(item)
+    #             batch_size = train_args['val_batch_size']
+    #             val_counter += batch_size
+    #             val_pbar.update(batch_size)
+    #         log_string = logging_handler.write('Pretrained')
+    #         epoch_pbar.write(log_string)
+    #         val_counter.stop()
+    #     except KeyboardInterrupt:
+    #         if 'val_steps' not in train_args:
+    #             val_counter.reset()
+    #         logging_handler.write("Skipping pre-training validation.")
+    #     epoch_pbar.update(1)
+    #     val_pbar.close()
+    #
+    #     try:
+    #         epoch_digits = str(gouda.num_digits(epochs))
+    #         for epoch in range(starting_epoch, epochs):
+    #             train_pbar = tqdm.tqdm(total=train_counter(), unit=' samples', leave=False)
+    #             for item in train_data:
+    #                 batch_size = train_args['batch_size']
+    #                 train_counter += batch_size
+    #                 train_pbar.update(batch_size)
+    #                 distributed_train_step(item)
+    #             train_pbar.close()
+    #             val_pbar = tqdm.tqdm(total=val_counter(), leave=False)
+    #             for item in val_data:
+    #                 batch_size = train_args['val_batch_size']
+    #                 val_counter += batch_size
+    #                 val_pbar.update(batch_size)
+    #                 distributed_val_step(item)
+    #             val_pbar.close()
+    #             train_counter.stop()
+    #             val_counter.stop()
+    #             log_string = logging_handler.write(epoch)
+    #             epoch_pbar.write(log_string)
+    #             epoch_pbar.update(1)
+    #             if (epoch + 1) % 10 == 0:
+    #                 weight_string = 'model_weights_e{:0' + epoch_digits + 'd}.tf'
+    #                 self.model.save_weights(weights_dir(weight_string.format(epoch)).abspath)
+    #
+    #     except KeyboardInterrupt:
+    #         logging_handler.interrupt()
+    #     self.model.save_weights(log_dir('model_weights.tf').abspath)
+    #     logging_handler.stop()
+    #     epoch_pbar.close()
 
     def __call__(self, x, *args, training=False, **kwargs):
         return self.model(x, *args, training=training, **kwargs)
