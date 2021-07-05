@@ -5,6 +5,7 @@ os.environ['TF_XLA_FLAGS'] = '--tf_xla_enable_xla_devices'
 
 try:  # Any code that relies on tensorflow
     import tensorflow as tf
+    from .augmenter import get_image_augmenter
     from .model_arch import get_model_func
     from .losses import get_loss_func
     from .learning_rates import get_lr_func

@@ -75,6 +75,9 @@ class DistributedModel(CoreModel):
                 train_args = gouda.load_json(args_path)
             else:
                 raise ValueError("No training args file found at `{}`".format(args_path.abspath))
+        # TODO - check to see if dataset is distributed, requires manual batchsize if so
+        # train_args['batch_size'] = 8
+        # train_args['val_batch_size'] = 8
         for item in train_data.take(1):
             train_args['batch_size'] = item[0].numpy().shape[0]
         for item in val_data.take(1):

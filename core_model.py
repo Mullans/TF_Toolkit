@@ -174,7 +174,7 @@ class CoreModel(object):
             elif found_h5:
                 path = path + '.h5'
             else:
-                raise ValueError("No saved weights found for version `{}`".format(version))
+                raise FileNotFoundError("No saved weights found for version `{}`".format(version))
         if isinstance(path, os.PathLike):
             path = str(path)
         if path.endswith('.index'):
