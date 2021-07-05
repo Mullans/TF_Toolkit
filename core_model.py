@@ -1,4 +1,5 @@
 import gouda
+import json
 import os
 import tensorflow as tf
 import tensorflow.keras.backend as K
@@ -25,12 +26,33 @@ from .train_functions import get_update_step
 from .Logging import EmptyLoggingHandler
 
 
+def is_jsonable(x):
+    try:
+        json.dumps(x)
+        return True
+    except TypeError:
+        return False
+
+
+def clean_for_json(x):
+    if isinstance(x, dict):
+        return {key: clean_for_json(x[key]) for key in x}
+    elif isinstance(x, (list, tuple)):
+        old_type = type(x)
+        new_data = [clean_for_json(item) for item in x]
+        new_data = old_type(new_data)
+        return new_data
+    else:
+        return x if is_jsonable(x) else 'CUSTOM: ' + str(x)
+
+
 class CoreModel(object):
     def __init__(self,
                  model_group='default',
                  model_name='default',
                  project_dir=None,
                  load_args=False,
+                 overwrite_args=False,
                  # distributed=False,
                  **kwargs):
         if project_dir is None:
@@ -62,7 +84,7 @@ class CoreModel(object):
         args_path = self.model_dir('model_args.json')
         if load_args:
             self.load_args(args_path)
-        if not args_path.exists():
+        if overwrite_args or not args_path.exists():
             self.save_args()
 
     def load_args(self, args_path):
@@ -77,7 +99,7 @@ class CoreModel(object):
             loaded_args = gouda.load_json(args_path)
             for key in loaded_args:
                 self.model_args[key] = loaded_args[key]
-                if loaded_args[key] == 'custom':
+                if loaded_args[key].startswith('CUSTOM: '):
                     to_warn.append(key)
             if len(to_warn) > 0:
                 warnings.warn('Custom arguments for [{}] were found and should be replaced'.format(', '.join(to_warn)))
@@ -92,18 +114,7 @@ class CoreModel(object):
         Custom methods/models/etc will be saved with a value of 'custom' in the output file
         """
         save_args = self.model_args.copy()
-        for key in self.model_args:
-            arg_type = str(type(save_args[key]))
-            if 'function' in arg_type or '.keras.' in arg_type or '<class' in arg_type:
-                save_args[key] = 'custom'
-            elif isinstance(self.model_args[key], (list, tuple)):
-                new_args = []
-                for item in self.model_args[key]:
-                    arg_type = str(type(save_args[key]))
-                    if 'function' in arg_type or '.keras.' in arg_type or '<class' in arg_type:
-                        item = 'custom'
-                    new_args.append(item)
-                save_args[key] = new_args
+        save_args = clean_for_json(save_args)
         gouda.save_json(save_args, self.model_dir / 'model_args.json')
 
     def clear(self):
@@ -187,6 +198,8 @@ class CoreModel(object):
     def save_weights(self, path):
         if isinstance(path, gouda.GoudaPath):
             path = path.abspath
+        if self.model is None:
+            raise AttributeError('Weights cannot be saved before model is initialized')
         self.model.save_weights(path)
 
     def export_model(self, path):
@@ -348,11 +361,7 @@ class CoreModel(object):
             train_args['val_step'] = 'custom'
 
         # Save training args as json
-        save_args = train_args.copy()
-        for key in train_args:
-            key_type = str(type(save_args[key]))
-            if 'function' in key_type or 'class' in key_type:
-                save_args[key] = 'custom'
+        save_args = clean_for_json(train_args.copy())
         gouda.save_json(save_args, args_path)
 
         # Start loggers
