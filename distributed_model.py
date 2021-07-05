@@ -4,6 +4,7 @@ import tensorflow as tf
 from .core_model import CoreModel
 from .losses import get_loss_func
 from .model_arch import get_model_func
+from .utils import LRLogger
 
 
 class DistributedModel(CoreModel):
@@ -56,9 +57,13 @@ class DistributedModel(CoreModel):
               save_every=10,
               load_args=False,
               reduce_lr_on_plateau=True,
+              extra_callbacks=[],
               version='default',
               **kwargs):
-        """NOTE: logging_handler from the CoreModel is replaced by metrics in the distributed. This model relies on the keras model.fit methods more than the custom training loop."""
+        """NOTE: logging_handler from the CoreModel is replaced by metrics in the distributed. This model relies on the keras model.fit methods more than the custom training loop.
+
+        NOTE: extra_callbacks should not include TensorBoard or ModelCheckpoint, since they are already used. ReduceLROnPlateau and LRLogger will be already included as well if reduce_lr_on_plateau is True.
+        """
         log_dir = gouda.ensure_dir(self.model_dir(version))
         args_path = log_dir('training_args.json')
         weights_dir = gouda.ensure_dir(log_dir('training_weights'))
@@ -120,7 +125,8 @@ class DistributedModel(CoreModel):
             callbacks.append(tf.keras.callbacks.ReduceLROnPlateau(monitor='val_loss',
                                                                   factor=train_args['plateau_factor'],
                                                                   patience=train_args['plateau_patience']))
-
+            callbacks.append(LRLogger())
+        callbacks += extra_callbacks
         with self.strategy.scope():
             self.model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
 
