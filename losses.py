@@ -1,3 +1,5 @@
+from functools import partial
+
 import tensorflow as tf
 
 
@@ -55,7 +57,7 @@ def mixed_IOU_BCE_loss(beta=0.5, label_smoothing=0.1, reduction='auto', **kwargs
     return tf.function(loss)
 
 
-def focal_loss(beta=0.25, gamma=2, **kwargs):
+def focal_loss(beta=0.25, gamma=2, reduction='sum_over_batch_size', **kwargs):
     """https://arxiv.org/abs/1708.02002 - code adapted from https://lars76.github.io/neural-networks/object-detection/losses-for-segmentation/"""
     def focal_loss_with_logits(logits, targets, beta, gamma, y_pred):
         weight_a = beta * (1 - y_pred) ** gamma * targets
@@ -63,13 +65,23 @@ def focal_loss(beta=0.25, gamma=2, **kwargs):
 
         return (tf.math.log1p(tf.exp(-tf.abs(logits))) + tf.nn.relu(-logits)) * (weight_a + weight_b) + logits * weight_b
 
+    if reduction == 'sum_over_batch_size' or reduction == 'auto':
+        reduction_func = partial(tf.reduce_mean, axis=(1, 2, 3))  # NOTE: This assumes [batch, x, y, channels]
+    elif reduction == 'sum':
+        reduction_func = tf.reduce_sum
+    elif reduction == 'none':
+        def reduction_func(x):
+            return x
+    else:
+        raise ValueError("Unknown reduction method")
+
     def loss(y_true, y_pred):
         y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1 - tf.keras.backend.epsilon())
         logits = tf.math.log(y_pred / (1 - y_pred))
 
         loss = focal_loss_with_logits(logits=logits, targets=y_true, beta=beta, gamma=gamma, y_pred=y_pred)
 
-        return tf.reduce_mean(loss)
+        return reduction_func(loss)
 
     return tf.function(loss)
 
