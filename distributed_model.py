@@ -41,6 +41,10 @@ class DistributedModel(CoreModel):
         with self.strategy.scope():
             self.model = model_func(**self.model_args)
 
+    @property
+    def num_replicas_in_sync(self):
+        return self.strategy.num_replicas_in_sync
+
     def train(self,
               train_data,
               val_data,
@@ -52,7 +56,6 @@ class DistributedModel(CoreModel):
               save_every=10,
               load_args=False,
               reduce_lr_on_plateau=True,
-              sample_callback=None,
               version='default',
               **kwargs):
         """NOTE: logging_handler from the CoreModel is replaced by metrics in the distributed. This model relies on the keras model.fit methods more than the custom training loop."""

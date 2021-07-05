@@ -181,6 +181,9 @@ class CoreModel(object):
             path = path.replace('.index', '')
         self.model.load_weights(path)
 
+    def list_versions(self):
+        return self.model_dir.children(dirs_only=True, basenames=True)
+
     def save_weights(self, path):
         if isinstance(path, gouda.GoudaPath):
             path = path.abspath
