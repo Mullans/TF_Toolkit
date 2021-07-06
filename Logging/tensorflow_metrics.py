@@ -64,7 +64,7 @@ class BalanceScore(tf.keras.metrics.Metric):
             return tf.maximum(ratio, 1 - ratio)
         return ratio
 
-    def reset_states(self):
+    def reset_state(self):
         self.positives.assign(0.)
         self.total.assign(0.)
 
@@ -114,7 +114,7 @@ class MatthewsCorrelationCoefficient(tf.keras.metrics.Metric):
         base_config = super(MatthewsCorrelationCoefficient, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
-    def reset_states(self):
+    def reset_state(self):
         self.true_positive.assign(0.)
         self.true_negative.assign(0.)
         self.false_positive.assign(0.)
@@ -151,7 +151,7 @@ class BooleanDiceScore(tf.keras.metrics.Metric):
     def get_config(self):
         return super(BooleanDiceScore, self).get_config()
 
-    def reset_states(self):
+    def reset_state(self):
         self.true_positive.assign(0.)
         self.false_positive.assign(0.)
         self.false_negative.assign(0.)
@@ -181,6 +181,6 @@ class ScalarDiceScore(tf.keras.metrics.Metric):
     def get_config(self):
         return super(ScalarDiceScore, self).get_config()
 
-    def reset_states(self):
+    def reset_state(self):
         self.numerator.assign(0.)
         self.denominator.assign(0.)
