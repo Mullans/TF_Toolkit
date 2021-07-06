@@ -56,7 +56,7 @@ class DistributedModel(CoreModel):
               epochs=50,
               save_every=10,
               load_args=False,
-              reduce_lr_on_plateau=True,
+              reduce_lr_on_plateau=False,
               extra_callbacks=[],
               version='default',
               **kwargs):

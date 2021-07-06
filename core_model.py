@@ -64,8 +64,6 @@ class CoreModel(object):
             'model_group': model_group,
             'train_step': 'default',
             'val_step': 'default',
-            'sample_step': None,
-            'loss_type': None,
             'lr_type': 'base',
             'model_func': None
         }
@@ -129,6 +127,10 @@ class CoreModel(object):
             Either the string to lookup, the model function, or None if you want to use the function from self.model_args (the default is None)
         checking: bool
             If true, will only compile a model if there is no compiled model already
+
+        Note
+        ----
+        Compile here means to prepare the model/weights not compile like the keras model.compile() method.
         """
         if checking and self.model is not None:
             return
@@ -220,10 +222,12 @@ class CoreModel(object):
 
     @property
     def loss_type(self):
-        if isinstance(self.model_args['loss_type'], str):
+        if 'loss_type' not in self.model_args:
+            return None
+        elif isinstance(self.model_args['loss_type'], str):
             return self.model_args['loss_type']
         else:
-            return 'custom'
+            return 'CUSTOM: ' + str(self.model_args['loss_type'])
 
     @loss_type.setter
     def loss_type(self, loss_type):
@@ -234,7 +238,7 @@ class CoreModel(object):
         if isinstance(self.model_args['train_step'], str):
             return self.model_args['train_step']
         else:
-            return 'custom'
+            return 'CUSTOM: ' + str(self.model_args['train_step'])
 
     @train_step.setter
     def train_step(self, train_step):
@@ -245,7 +249,7 @@ class CoreModel(object):
         if isinstance(self.model_args['val_step'], str):
             return self.model_args['val_step']
         else:
-            return 'custom'
+            return 'CUSTOM: ' + str(self.model_args['val_step'])
 
     @val_step.setter
     def val_step(self, val_step):
@@ -335,7 +339,7 @@ class CoreModel(object):
 
         # Set loss type
         if train_args['loss_type'] is None:
-            if self.model_args['loss_type'] is None:
+            if 'loss_type' not in self.model_args or self.model_args['loss_type'] is None:
                 raise ValueError("No loss function defined")
             train_args['loss_type'] = self.model_args['loss_type']
         if isinstance(train_args['loss_type'], str):
