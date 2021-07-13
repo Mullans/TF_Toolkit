@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from .utils import matrices_to_flat_transforms, tf_transform
+from .utils import matrices_to_flat_transforms, tf_transform, gaussian_blur, enforce_4D
 
 
 def tf_radians(degrees):
@@ -297,83 +297,41 @@ def get_image_augmenter(
         return image
     if as_tf_pyfunc:
         def tf_augment(image, label=None):
+            if label is None:
+                return tf.py_function(func=augment_func, inp=[image], Tout=tf.float32)
             return tf.py_function(func=augment_func, inp=[image, label], Tout=(tf.float32, tf.float32))
         return tf_augment
     return augment_func
 
 
-# Previous version of image_augmenter
-# def get_image_augmenter(flip_h=True,
-#                         flip_v=False,
-#                         width_scale_range=(1.0, 1.0),
-#                         height_scale_range=(1.0, 1.0),
-#                         max_rotation=0.0,
-#                         max_shear=0.0,
-#                         x_max_shift=30,
-#                         y_max_shift=30,
-#                         as_degrees=True,
-#                         label_as_map=True,
-#                         **kwargs):
-#     """Get an augmentation function for image/label paired data points
-#
-#     Parameters
-#     ----------
-#     flip_h : bool
-#         Whether to randomly apply horizontal flips (the default is True)
-#     flip_v : bool
-#         Whether to randomly apply vertical flips (the default is True)
-#     width_scale_range : (float, float) | float
-#         The minimum and maximum scaling factor for image width OR the factor in either direction ie. 0.05 -> [0.95, 1.05] (the default is (1.0, 1.0))
-#     height_scale_range : (float, float) | float
-#         The minimum and maximum scaling factor for image height OR the factor in either direction ie. 0.05 -> [0.95, 1.05] (the default is (1.0, 1.0))
-#     max_rotation : float
-#         The maximum rotation (in either direction) for the image (the default is 0)
-#     max_shear : float
-#         The maximum shear angle (in either direction) for the image (the default is 0)
-#     x_max_shift : int
-#         The maximum shift in pixels for the image (the default is 30)
-#     y_max_shift : int
-#         The maximum shift in pixels for the image (the default is 30)
-#     as_degrees : bool
-#         Whether the input rotation/shear values are in degrees rather than radians (the default is True)
-#     label_as_map : bool
-#         Whether to treat the label as a class map with the same size as the image or as a scalar class (the default is True).
-#     """
-#     if as_degrees:
-#         max_rotation = np.radians(max_rotation)
-#         max_shear = np.radians(max_shear)
-#     if not hasattr(width_scale_range, '__len__') or len(width_scale_range) == 1:
-#         width_scale_range = (1 - width_scale_range, 1 + width_scale_range)
-#     if not hasattr(height_scale_range, '__len__') or len(height_scale_range) == 1:
-#         height_scale_range = (1 - height_scale_range, 1 + height_scale_range)
-#
-#     def augment_func(image, label):
-#         if flip_h:
-#             if tf.random.normal([1]) > 0:
-#                 image = tf.image.flip_left_right(image)
-#                 if label_as_map:
-#                     label = tf.image.flip_left_right(label)
-#         if flip_v:
-#             if tf.random.normal([1]) > 0:
-#                 image = tf.image.flip_up_down(image)
-#                 if label_as_map:
-#                     label = tf.image.flip_up_down(label)
-#
-#         width_scale = tf.random.uniform([], *width_scale_range)
-#         height_scale = tf.random.uniform([], *height_scale_range)
-#         rotation = tf.random.uniform([], -max_rotation, max_rotation)
-#         shear = tf.random.uniform([], -max_shear, max_shear)
-#         shift_x = tf.random.uniform([], -x_max_shift, x_max_shift)
-#         shift_y = tf.random.uniform([], -y_max_shift, y_max_shift)
-#
-#         row_1 = tf.stack([width_scale * tf.cos(rotation), -height_scale * tf.sin(rotation + shear), shift_x])
-#         row_2 = tf.stack([width_scale * tf.sin(rotation), height_scale * tf.cos(rotation + shear), shift_y])
-#         row_3 = tf.stack([0.0, 0.0, 1.0])
-#         params = tf.stack([row_1, row_2, row_3])
-#
-#         flat_transform = matrices_to_flat_transforms(tf.linalg.inv(params))
-#         image = tf_transform(image, flat_transform, interpolation='BILINEAR')
-#         if label_as_map:
-#             label = tf_transform(label, flat_transform, interpolation='NEAREST')
-#         return image, label
-#     return tf.function(augment_func)
+def get_blur_augmenter(
+    image_height,
+    image_width,
+    filter_range=[3, 5],
+    sigma_range=[1, 5],
+    random_distribution=tf.random.uniform,
+    run_on_batch=True,
+    as_tf_pyfunc=False,
+):
+
+    def _rand_int(vals):
+        return random_distribution([], minval=vals[0], maxval=vals[1], dtype=tf.int32)
+
+    def augment_func(image, label=None):
+        image = enforce_4D(image)
+        filter_size = random_distribution([], minval=filter_range[0], maxval=filter_range[1], dtype=tf.int32)
+        sigma = random_distribution([], minval=sigma_range[0], maxval=sigma_range[1], dtype=tf.float32)
+        blurred = gaussian_blur(image, filter_size=filter_size, sigma=sigma)
+        if not run_on_batch:
+            blurred = blurred[0]
+        if label is not None:
+            return blurred, label
+        return blurred
+
+    if as_tf_pyfunc:
+        def tf_augment(image, label=None):
+            if label is None:
+                return tf.py_function(func=augment_func, inp=[image], Tout=tf.float32)
+            return tf.py_function(func=augment_func, inp=[image, label], Tout=(tf.float32, tf.float32))
+        return tf_augment
+    return augment_func
