@@ -97,7 +97,7 @@ class CoreModel(object):
             loaded_args = gouda.load_json(args_path)
             for key in loaded_args:
                 self.model_args[key] = loaded_args[key]
-                if loaded_args[key].startswith('CUSTOM: '):
+                if isinstance(loaded_args[key], str) and loaded_args[key].startswith('CUSTOM: '):
                     to_warn.append(key)
             if len(to_warn) > 0:
                 warnings.warn('Custom arguments for [{}] were found and should be replaced'.format(', '.join(to_warn)))
@@ -147,7 +147,7 @@ class CoreModel(object):
 
         self.model = model_func(**self.model_args)
 
-    def load_weights(self, group_name=None, model_name=None, version=None, path=None):
+    def load_weights(self, group_name=None, model_name=None, version=None, path=None, **kwargs):
         """Load weights from an existing trained model.
 
         Paramters
@@ -192,7 +192,7 @@ class CoreModel(object):
             path = str(path)
         if path.endswith('.index'):
             path = path.replace('.index', '')
-        self.model.load_weights(path)
+        self.model.load_weights(path, **kwargs)
 
     def list_versions(self):
         return self.model_dir.children(dirs_only=True, basenames=True)
@@ -214,7 +214,7 @@ class CoreModel(object):
         if isinstance(self.model_args['lr_type'], str):
             return self.model_args['lr_type']
         else:
-            return 'custom'
+            return 'CUSTOM: ' + str(self.model_args['lr_type'])
 
     @lr_type.setter
     def lr_type(self, lr_type):
@@ -294,7 +294,7 @@ class CoreModel(object):
             lr = get_lr_func(train_args['lr_type'])(**train_args)
         else:
             lr = train_args['lr_type']
-            train_args['lr_type'] = 'custom'
+            train_args['lr_type'] = 'CUSTOM: ' + str(train_args['lr_type'])
         return tf.keras.optimizers.Adam(learning_rate=lr)
 
     def train(self,
@@ -346,7 +346,7 @@ class CoreModel(object):
             loss = get_loss_func(train_args['loss_type'])(**train_args)
         else:
             loss = train_args['loss_type']
-            train_args['loss_type'] = 'custom'
+            train_args['loss_type'] = str(loss)
 
         # Set training step
         train_args['train_step'] = self.model_args['train_step']
@@ -354,7 +354,7 @@ class CoreModel(object):
             train_step = get_update_step(train_args['train_step'], is_training=True)
         else:
             train_step = train_args['train_step']
-            train_args['train_step'] = 'custom'
+            train_args['train_step'] = 'custom__train_func'
 
         # Set validation step
         train_args['val_step'] = self.model_args['val_step']
@@ -362,7 +362,7 @@ class CoreModel(object):
             val_step = get_update_step(train_args['val_step'], is_training=False)
         else:
             val_step = train_args['val_step']
-            train_args['val_step'] = 'custom'
+            train_args['val_step'] = 'custom_val_func'
 
         # Save training args as json
         save_args = clean_for_json(train_args.copy())
