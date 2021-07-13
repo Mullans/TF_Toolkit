@@ -1,7 +1,7 @@
 import gouda
 import tensorflow as tf
 
-from .core_model import CoreModel
+from .core_model import CoreModel, clean_for_json
 from .losses import get_loss_func
 from .model_arch import get_model_func
 from .utils import LRLogger
@@ -104,16 +104,17 @@ class DistributedModel(CoreModel):
             loss = get_loss_func(train_args['loss_type'])(**train_args)
         else:
             loss = train_args['loss_type']
-            train_args['loss_type'] = 'custom'
+            train_args['loss_type'] = str(loss)
 
         # Currently, just uses the default training/validation steps
 
         # Save training args as json
-        save_args = train_args.copy()
-        for key in train_args:
-            key_type = str(type(save_args[key]))
-            if 'function' in key_type or 'class' in key_type:
-                save_args[key] = 'custom'
+        # save_args = train_args.copy()
+        # for key in train_args:
+        #     key_type = str(type(save_args[key]))
+        #     if 'function' in key_type or 'class' in key_type:
+        #         save_args[key] = 'custom'
+        save_args = clean_for_json(train_args.copy())
         gouda.save_json(save_args, args_path)
 
         checkpoint_prefix = weights_dir('model_weights_e{epoch}').abspath
