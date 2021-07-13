@@ -126,6 +126,14 @@ def flip_matrix(height, width, v_flip=False, h_flip=True):
     return tf.convert_to_tensor(transform)
 
 
+def wrap_tf_augment(augment_func):
+    def tf_augment(image, label=None):
+        if label is None:
+            return tf.py_function(func=augment_func, inp=[image], Tout=tf.float32)
+        return tf.py_function(func=augment_func, inp=[image, label], Tout=(tf.float32, tf.float32))
+    return tf_augment
+
+
 def get_image_augmenter(
     image_height,
     image_width,
@@ -230,42 +238,25 @@ def get_image_augmenter(
         return random_distribution([], minval=vals[0], maxval=vals[1])
 
     def augment_func(image, label=None):
-        # shape = tf.shape(image)
-        # if len(shape) == 4:
-        #     height, width = float(shape[1]), float(shape[2])
-        # elif len(shape) == 3:
-        #     height, width = float(shape[0]), float(shape[1])
-        # else:
-        #     raise ValueError('Image/Label must have shape [batch, height, width, channels] or [height, width, channels], not {}'.format(image.shape))
-        height = image_height
-        width = image_width
-        # print(shape, height, width)
-        # print(height.shape, width.shape)
         transform = tf.eye(3, dtype=tf.float32)
         affine_changed = False
-        # num_choices = 0
-        # for p in augment_chance:
-        #     if tf.random.uniform([], 0, 1) <= p:
-        #         num_choices += 1
-        #     else:
-        #         break
         num_choices = tf.math.count_nonzero(tf.random.uniform(augment_chance.shape, 0, 1) < augment_chance)
         num_choices = tf.minimum(num_choices, max_choices)
         for augment in np.random.choice(choices, num_choices, replace=False):
             if augment == 'flip_h':
-                transform = transform @ flip_matrix(height, width, False, True)
+                transform = transform @ flip_matrix(image_height, image_width, False, True)
                 affine_changed = True
             elif augment == 'flip_v':
-                transform = transform @ flip_matrix(height, width, True, False)
+                transform = transform @ flip_matrix(image_height, image_width, True, False)
                 affine_changed = True
             elif augment == 'width_scaling':
-                transform = transform @ scaling_matrix(height, width, _quick_random(width_scaling), 1.0)
+                transform = transform @ scaling_matrix(image_height, image_width, _quick_random(width_scaling), 1.0)
                 affine_changed = True
             elif augment == 'height_scaling':
-                transform = transform @ scaling_matrix(height, width, 1.0, _quick_random(height_scaling))
+                transform = transform @ scaling_matrix(image_height, image_width, 1.0, _quick_random(height_scaling))
                 affine_changed = True
             elif augment == 'rotation':
-                transform = transform @ rotation_matrix(width // 2, height // 2, _quick_random(rotation_range))
+                transform = transform @ rotation_matrix(image_width // 2, image_height // 2, _quick_random(rotation_range))
                 affine_changed = True
             elif augment == 'shear':
                 transform = transform @ shear_matrix(_quick_random(shear_range))
@@ -296,11 +287,7 @@ def get_image_augmenter(
             return image, label
         return image
     if as_tf_pyfunc:
-        def tf_augment(image, label=None):
-            if label is None:
-                return tf.py_function(func=augment_func, inp=[image], Tout=tf.float32)
-            return tf.py_function(func=augment_func, inp=[image, label], Tout=(tf.float32, tf.float32))
-        return tf_augment
+        return wrap_tf_augment(augment_func)
     return augment_func
 
 
@@ -313,7 +300,6 @@ def get_blur_augmenter(
     run_on_batch=True,
     as_tf_pyfunc=False,
 ):
-
     def _rand_int(vals):
         return random_distribution([], minval=vals[0], maxval=vals[1], dtype=tf.int32)
 
@@ -329,9 +315,17 @@ def get_blur_augmenter(
         return blurred
 
     if as_tf_pyfunc:
-        def tf_augment(image, label=None):
-            if label is None:
-                return tf.py_function(func=augment_func, inp=[image], Tout=tf.float32)
-            return tf.py_function(func=augment_func, inp=[image, label], Tout=(tf.float32, tf.float32))
-        return tf_augment
+        return wrap_tf_augment(augment_func)
+    return augment_func
+
+
+def get_normal_noise_augmenter(mean=0.0, stddev=0.05, as_tf_pyfunc=False):
+    def augment_func(image, label=None):
+        image += tf.random.normal(image.shape, mean=mean, stddev=stddev, dtype=image.dtype)
+        if label is not None:
+            return image, label
+        return image
+
+    if as_tf_pyfunc:
+        return wrap_tf_augment(augment_func)
     return augment_func
