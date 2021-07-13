@@ -374,3 +374,20 @@ def tb2df(path):
         print("Event file possibly corrupt: {}".format(path))
         traceback.print_exc()
     return runlog_data
+
+
+def gaussian_kernel(sigma, filter_shape):
+    x = tf.range(-filter_shape // 2 + 1, filter_shape // 2 + 1)
+    x = tf.cast(x ** 2, sigma.dtype)
+    x = tf.nn.softmax(-x / (2.0 * sigma ** 2))
+    kernel = tf.matmul(x[:, tf.newaxis], x[tf.newaxis, :])
+    return kernel
+
+
+def gaussian_blur(image, filter_size=3, sigma=1):
+    sigma = tf.cast(sigma, image.dtype)
+    kernel = gaussian_kernel(sigma, filter_size)
+    kernel = tf.tile(kernel[:, :, tf.newaxis, tf.newaxis],
+                     [1, 1, tf.shape(image)[-1], 1])
+    output = tf.nn.depthwise_conv2d(image, kernel, (1, 1, 1, 1), 'SAME')
+    return output

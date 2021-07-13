@@ -20,7 +20,7 @@ def GradCAMPlus(model, input_image, layer_name, logit_layer_name=None, resize_to
 
     NOTE
     ----
-    This assumes a segmentation model with [0, 1] range outputs 
+    This assumes a segmentation model with [0, 1] range outputs
 
     Adapted from: https://github.com/adityac94/Grad_CAM_plus_plus/blob/master/misc/utils.py
     """
@@ -30,8 +30,10 @@ def GradCAMPlus(model, input_image, layer_name, logit_layer_name=None, resize_to
     with tf.GradientTape() as tape:
         conv_output, predictions = gradient_model(input_image)
     grads = tape.gradient(predictions, conv_output)
+    # This is only needed for segmentation
     small_pred = tf.image.resize(predictions, grads.shape[1:3])
 
+    # small_pred should be class-specific score
     first_deriv = tf.exp(small_pred) * grads
     second_deriv = first_deriv * grads
     third_deriv = second_deriv * grads
