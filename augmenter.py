@@ -148,6 +148,7 @@ def get_image_augmenter(
     y_shift=(0, 0),
     brightness_range=(0.0, 0.0),
     contrast_range=(1.0, 1.0),
+    noise_stddev=0.0,
     random_distribution=tf.random.uniform,
     run_on_batch=True,
     as_tf_pyfunc=False,
@@ -177,6 +178,8 @@ def get_image_augmenter(
         The minimum and maximum delta to apply to image brightness (the default is (0, 0))
     contrast_range: (float, float)
         The minimum and maximum factor to change image contrast by (the default is (1, 1))
+    noise_stddev: float
+        The standard deviation of normal noise centered at 0.0 to add to the image (the default is 0.0)
     random_distribution: function
         The function for the random distribution to use for augmentation values (the default is numpy.random.uniform)
     run_on_batch: bool
@@ -231,6 +234,8 @@ def get_image_augmenter(
         choices.append('brightness')
     if contrast_range[0] < 1.0 or contrast_range[1] > 1.0:
         choices.append('contrast')
+    if noise_stddev > 0.0:
+        choices.append('noise')
     max_choices = len(choices)
     augment_chance = np.array(augment_chance)
 
@@ -271,6 +276,8 @@ def get_image_augmenter(
                 image = tf.image.adjust_brightness(image, _quick_random(brightness_range))
             elif augment == 'contrast':
                 image = tf.image.adjust_contrast(image, _quick_random(contrast_range))
+            elif augment == 'noise':
+                image += tf.random.normal(image.shape, mean=0.0, stddev=noise_stddev, dtype=image.dtype)
             else:
                 raise ValueError("Unknown augmentation selected?")
         if affine_changed:
@@ -313,18 +320,6 @@ def get_blur_augmenter(
         if label is not None:
             return blurred, label
         return blurred
-
-    if as_tf_pyfunc:
-        return wrap_tf_augment(augment_func)
-    return augment_func
-
-
-def get_normal_noise_augmenter(mean=0.0, stddev=0.05, as_tf_pyfunc=False):
-    def augment_func(image, label=None):
-        image += tf.random.normal(image.shape, mean=mean, stddev=stddev, dtype=image.dtype)
-        if label is not None:
-            return image, label
-        return image
 
     if as_tf_pyfunc:
         return wrap_tf_augment(augment_func)
