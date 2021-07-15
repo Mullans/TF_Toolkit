@@ -198,6 +198,12 @@ def rescale_image(image, dtype=tf.float32):
     return image
 
 
+def rescale(x, axis=None, keepdims=False):
+    min_val = tf.reduce_min(x, axis=axis, keepdims=keepdims)
+    max_val = tf.reduce_max(x, axis=axis, keepdims=keepdims)
+    return tf.math.divide_no_nan(x - min_val, max_val - min_val)
+
+
 def numpy_to_native(item):
     return getattr(item, 'tolist', lambda: item)()
 
@@ -391,3 +397,15 @@ def gaussian_blur(image, filter_size=3, sigma=1):
                      [1, 1, tf.shape(image)[-1], 1])
     output = tf.nn.depthwise_conv2d(image, kernel, (1, 1, 1, 1), 'SAME')
     return output
+
+
+def glorot_uniform(kernel_shape):
+    """NumPy implementation for a glorot uniform kernel initializer"""
+    receptive_field_size = np.prod(kernel_shape[:-2])
+    fan_in = kernel_shape[-2] * receptive_field_size
+    fan_out = kernel_shape[-1] * receptive_field_size
+
+    np.random.seed(42)
+    scale = 1. / max(1., (fan_in + fan_out) / 2)
+    limit = np.sqrt(3.0 * scale)
+    return np.random.uniform(-limit, limit, kernel_shape)
