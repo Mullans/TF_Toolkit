@@ -1,11 +1,16 @@
+from .gradients import simple_gradients, integrated_gradients
 import tensorflow as tf
 
 
-def GradCAM(model, input_image, layer_name, resize_to_input=False):
-    gradient_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(layer_name).output, model.output])
-    with tf.GradientTape() as tape:
-        conv_output, predictions = gradient_model(input_image)
-    grads = tape.gradient(predictions, conv_output)
+def GradCAM(model, input_image, layer_name, gradient_type='simple', resize_to_input=False, **gradient_kwargs):
+    # gradient_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(layer_name).output, model.output])
+    # with tf.GradientTape() as tape:
+    #     conv_output, predictions = gradient_model(input_image)
+    # grads = tape.gradient(predictions, conv_output)
+    if gradient_type == 'simple':
+        conv_output, grads, _ = simple_gradients(model, input_image, layer_name, **gradient_kwargs)
+    elif gradient_type == 'integrated':
+        conv_output, grads, _ = integrated_gradients(model, input_image, layer_name, **gradient_kwargs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
     heatmap = conv_output @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
@@ -15,7 +20,7 @@ def GradCAM(model, input_image, layer_name, resize_to_input=False):
     return heatmap
 
 
-def GradCAMPlus(model, input_image, layer_name, logit_layer_name=None, resize_to_input=False):
+def GradCAMPlus(model, input_image, layer_name, gradient_type='simple', resize_to_input=False, **gradient_kwargs):
     """GradCAM++ algorithm for segmentations
 
     NOTE
@@ -24,12 +29,16 @@ def GradCAMPlus(model, input_image, layer_name, logit_layer_name=None, resize_to
 
     Adapted from: https://github.com/adityac94/Grad_CAM_plus_plus/blob/master/misc/utils.py
     """
-    logits = model.output if logit_layer_name is None else model.get_layer(logit_layer_name)
+    # logits = model.output if logit_layer_name is None else model.get_layer(logit_layer_name)
 
-    gradient_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(layer_name).output, logits])
-    with tf.GradientTape() as tape:
-        conv_output, predictions = gradient_model(input_image)
-    grads = tape.gradient(predictions, conv_output)
+    # gradient_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(layer_name).output, logits])
+    # with tf.GradientTape() as tape:
+    #     conv_output, predictions = gradient_model(input_image)
+    # grads = tape.gradient(predictions, conv_output)
+    if gradient_type == 'simple':
+        conv_output, grads, predictions = simple_gradients(model, input_image, layer_name, **gradient_kwargs)
+    elif gradient_type == 'integrated':
+        conv_output, grads, predictions = integrated_gradients(model, input_image, layer_name, **gradient_kwargs)
     # This is only needed for segmentation
     small_pred = tf.image.resize(predictions, grads.shape[1:3])
 
