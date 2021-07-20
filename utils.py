@@ -204,6 +204,12 @@ def rescale(x, axis=None, keepdims=False):
     return tf.math.divide_no_nan(x - min_val, max_val - min_val)
 
 
+def normalize(x, axis=None, keepdims=False):
+    mean = tf.reduce_mean(x, axis=axis, keepdims=keepdims)
+    std = tf.math.reduce_std(x, axis=axis, keepdims=keepdims)
+    return tf.math.divide_no_nan(x - mean, std)
+
+
 def numpy_to_native(item):
     return getattr(item, 'tolist', lambda: item)()
 
@@ -409,3 +415,16 @@ def glorot_uniform(kernel_shape):
     scale = 1. / max(1., (fan_in + fan_out) / 2)
     limit = np.sqrt(3.0 * scale)
     return np.random.uniform(-limit, limit, kernel_shape)
+
+
+def clip_outlier(x, deviations=3, axis=None):
+    mean = tf.reduce_mean(x, axis=axis, keepdims=True)
+    std = tf.math.reduce_std(x, axis=axis, keepdims=True)
+    return tf.clip_by_value(x, mean - deviations * std, mean + deviations * std)
+
+
+def clip_percentile(x, percentile=99, sided='upper', axis=None):
+    val = np.percentile(x, percentile, axis=axis)
+    if sided == 'upper':
+        return tf.clip_by_value(x, tf.reduce_min(x, axis=axis, keepdims=True), val)
+    return tf.clip_by_value(x, val, tf.reduce_max(x, axis=axis, keepdims=True))
