@@ -35,8 +35,8 @@ def dice_loss(as_scalar=True, reduction='sum_over_batch_size', **kwargs):
     reduction_func = get_reduction(reduction)
     if as_scalar:
         def loss(y_true, y_pred):
-            numerator = 2 * tf.reduce_sum(tf.reshape(y_true * y_pred, [y_true.shape[0], -1]), axis=1)
-            denominator = tf.reduce_sum(tf.reshape(y_true + y_pred, [y_true.shape[0], -1]), axis=1)
+            numerator = 2 * tf.reduce_sum(tf.reshape(y_true * y_pred, [tf.shape(y_true)[0], -1]), axis=1)
+            denominator = tf.reduce_sum(tf.reshape(y_true + y_pred, [tf.shape(y_true)[0], -1]), axis=1)
             dice = 1 - numerator / denominator
             return reduction_func(dice)
     else:
