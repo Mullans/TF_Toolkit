@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from ..utils import enforce_4D
+from ..utils import enforce_4D, rescale
 
 
 def simple_gradients(model, input_image, layer_name, logit_layer_name=None, **kwargs):
@@ -37,7 +37,27 @@ def integrated_gradients(model, input_image, layer_name, num_steps=25, baseline_
         grads = tf.reduce_sum(grads, axis=0, keepdims=True)
         all_grads = grads if all_grads is None else all_grads + grads
     conv_output, model_output = gradient_model(input_image)
-    return conv_output, all_grads / num_steps, model_output
+    return conv_output, tf.nn.relu(all_grads / num_steps), model_output
+
+
+def integrated_gradients_to_input(model, input_image, num_steps=25, baseline_image=None, logit_layer_name=None, max_batch_size=16, **kwargs):
+    """Integrated gradients, but specific to the input"""
+    input_image = enforce_4D(input_image)
+
+    baseline_image = tf.zeros_like(input_image) if baseline_image is None else enforce_4D(baseline_image)
+    diff_image = input_image - baseline_image
+    all_grads = None
+    steps = tf.linspace(0.0, 1.0, num_steps)
+    for min_idx in range(0, num_steps, max_batch_size):
+        max_idx = min(min_idx + max_batch_size, num_steps)
+        step_images = baseline_image + tf.concat([steps[inner_idx] * diff_image for inner_idx in range(min_idx, max_idx)], axis=0)
+        with tf.GradientTape() as tape:
+            tape.watch(step_images)
+            model_output = model(step_images)
+        grads = tape.gradient(model_output, step_images)
+        grads = tf.reduce_sum(grads, axis=0, keepdims=True)
+        all_grads = grads if all_grads is None else all_grads + grads
+    return rescale(np.squeeze(tf.nn.relu(all_grads / num_steps)))
 
 
 def smooth_gradients(model, input_image, layer_name, num_steps=25, noise_percent=0.15, baseline_image=None, logit_layer_name=None, max_batch_size=16, **kwargs):
