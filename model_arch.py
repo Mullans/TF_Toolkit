@@ -1,6 +1,7 @@
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras import Input, Model
-from tensorflow.keras.layers import (Activation, BatchNormalization, Concatenate, Conv2D, Conv3D, Conv2DTranspose, Conv3DTranspose, Dense, Dropout, Flatten, GlobalAveragePooling2D, GlobalAveragePooling3D, MaxPooling3D, LeakyReLU, Multiply, ReLU, DepthwiseConv2D, AveragePooling2D, Softmax)
+from tensorflow.keras.layers import (Activation, BatchNormalization, Concatenate, Conv2D, Conv3D, Conv2DTranspose, Conv3DTranspose, Dense, Dropout, Flatten, GlobalAveragePooling2D, MaxPool2D, GlobalAveragePooling3D, MaxPooling3D, LeakyReLU, Multiply, ReLU, DepthwiseConv2D, AveragePooling2D, Softmax, ZeroPadding2D)
 from tensorflow.keras.regularizers import L2
 
 
@@ -196,6 +197,22 @@ def separable_conv_layer(layer_input, filters, kernel=(3, 3), strides=(2, 2), no
     norm2 = BatchNormalization(center=True, scale=norm_scaling, epsilon=1e-4, name=name + '/pointConv/bn')(conv2)
     act2 = ReLU(name=name + '/pointConv/act')(norm2)
     return act2
+
+
+def pad_and_merge2D(layers, merge_op=Concatenate, name='pad_and_merge'):
+    with tf.name_scope(name) as scope:
+        max_size = np.array([-1, -1])
+        for item in layers:
+            max_size = np.maximum(item.shape[1:3], max_size)
+        out_layers = []
+        for idx, item in enumerate(layers):
+            total_pad = max_size - item.shape[1:3]
+            front_pad = total_pad // 2
+            back_pad = total_pad - front_pad
+            padding = ((front_pad[0], back_pad[0]), (front_pad[1], back_pad[1]))
+            item = ZeroPadding2D(padding=padding, name='padding_{}'.format(idx))(item)
+            out_layers.append(item)
+        return merge_op(name='merge')(out_layers)
 
 
 # Classification Models

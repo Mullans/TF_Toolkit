@@ -45,7 +45,6 @@ def shear_matrix(shear):
                                  [0, 0, 1]])
 
 
-@tf.function
 def shift_matrix(x_shift=0, y_shift=0):
     """Get the 3x3 translation transformation matrix
 
@@ -65,7 +64,6 @@ def shift_matrix(x_shift=0, y_shift=0):
                                  [0., 0., 1.]])
 
 
-@tf.function
 def scaling_matrix(height=0, width=0, width_scale=1.0, height_scale=1.0):
     """Get the 3x3 scaling transformation matrix
 
@@ -89,7 +87,6 @@ def scaling_matrix(height=0, width=0, width_scale=1.0, height_scale=1.0):
                                  [0, 0, 1]])
 
 
-@tf.function
 def flip_matrix(height, width, v_flip=False, h_flip=True):
     """Get the 3x3 flip transformation matrix
 
@@ -151,6 +148,7 @@ def get_image_augmenter(
     noise_stddev=0.0,
     random_distribution=tf.random.uniform,
     run_on_batch=True,
+    label_as_map=True,
     as_tf_pyfunc=False,
     **kwargs
 ):
@@ -284,11 +282,11 @@ def get_image_augmenter(
             transform = tf.cast(transform, tf.float32)
             transform = matrices_to_flat_transforms(transform, invert=True)
             image = tf_transform(image, transform, interpolation='BILINEAR')
-            if label is not None:
+            if label is not None and label_as_map:
                 label = tf_transform(label, transform, interpolation='NEAREST')
             if not run_on_batch:
                 image = image[0]
-                if label is not None:
+                if label is not None and label.ndim > 1:
                     label = label[0]
         if label is not None:
             return image, label

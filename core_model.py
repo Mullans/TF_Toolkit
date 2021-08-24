@@ -340,7 +340,7 @@ class CoreModel(object):
         # Set loss type
         if train_args['loss_type'] is None:
             if 'loss_type' not in self.model_args or self.model_args['loss_type'] is None:
-                raise ValueError("No loss function defined")
+                raise ValueError("No loss function defined. Use keyword 'loss_type' to define loss in model or training arguments.")
             train_args['loss_type'] = self.model_args['loss_type']
         if isinstance(train_args['loss_type'], str):
             loss = get_loss_func(train_args['loss_type'])(**train_args)
