@@ -306,6 +306,7 @@ class CoreModel(object):
               loss_type=None,
               epochs=50,
               save_every=10,
+              early_stopping=10,  # implement later - tie into logging
               load_args=False,
               sample_callback=None,
               version='default',
@@ -349,15 +350,17 @@ class CoreModel(object):
             train_args['loss_type'] = str(loss)
 
         # Set training step
-        train_args['train_step'] = self.model_args['train_step']
+        if 'train_step' not in train_args:
+            train_args['train_step'] = self.model_args['train_step']
         if isinstance(train_args['train_step'], str):
             train_step = get_update_step(train_args['train_step'], is_training=True)
         else:
             train_step = train_args['train_step']
-            train_args['train_step'] = 'custom__train_func'
+            train_args['train_step'] = 'custom_train_func'
 
         # Set validation step
-        train_args['val_step'] = self.model_args['val_step']
+        if 'val_step' not in train_args:
+            train_args['val_step'] = self.model_args['val_step']
         if isinstance(train_args['val_step'], str):
             val_step = get_update_step(train_args['val_step'], is_training=False)
         else:

@@ -1,6 +1,16 @@
 import tensorflow as tf
 
 
+class Version:
+    def __init__(self, module):
+        self.version_string = module.__version__
+        version = [int(item) for item in module.__version__.split('.')]
+        self.major = version[0]
+        self.minor = version[1]
+        if len(version) > 2:
+            self.micro = version[2]
+
+
 def exponential_decay_lr(learning_rate=1e-4, decay_steps=None, decay_rate=None, **kwargs):
     if decay_steps is None:
         raise ValueError('Decay steps must be set for exponential decay learning rate')
@@ -38,7 +48,11 @@ def cosine_decay_lr(learning_rate=1e-4, decay_steps=None, minimum_learning_rate=
         raise ValueError("Either alpha or minimum_learning_rate can be set, not both.")
     if alpha is None:
         alpha = minimum_learning_rate / learning_rate
-    lr = tf.keras.experimental.CosineDecay(learning_rate, decay_steps, alpha=alpha)
+    version = Version(tf)
+    if version.major >= 2 and version.minor >= 5:
+        lr = tf.keras.optimizers.schedules.CosineDecay(learning_rate, decay_steps, alpha=alpha)
+    else:
+        lr = tf.keras.experimental.CosineDecay(learning_rate, decay_steps, alpha=alpha)
     return lr
 
 
