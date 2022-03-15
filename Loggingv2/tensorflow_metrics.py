@@ -1,5 +1,5 @@
 import tensorflow as tf
-from .metrics import CoreMetricWrapper
+from .metric_wrapper import MetricWrapper
 epsilon = tf.keras.backend.epsilon()
 
 
@@ -16,7 +16,7 @@ def get_tf_metric(metric_name, **metric_kwargs):
     return metric_lookup[metric_name.lower()](**metric_kwargs)
 
 
-class TFMetricWrapper(CoreMetricWrapper):
+class TFMetricWrapper(MetricWrapper):
     def __init__(self, metric, relevant_idx, logging_prefix="", as_copy=False, log_pattern='{prefix}/{name}: {result:.4f}', as_percent=False):
         if as_copy:
             metric = tf.keras.metrics.deserialize(tf.keras.metrics.serialize(metric))
@@ -25,7 +25,7 @@ class TFMetricWrapper(CoreMetricWrapper):
         super().__init__(metric, relevant_idx, logging_prefix=logging_prefix, log_pattern=log_pattern, as_percent=as_percent)
 
     def __call__(self, results):
-        self.metric(*[results[idx] for idx in self.relevant_idx])
+        self.metric(*[tf.squeeze(results[idx]) for idx in self.relevant_idx])
 
     def reset(self):
         self.metric.reset_states()
@@ -125,16 +125,13 @@ class MatthewsCorrelationCoefficient(tf.keras.metrics.Metric):
 @tf.keras.utils.register_keras_serializable(package='TF_Toolkit')
 class BooleanDiceScore(tf.keras.metrics.Metric):
     """Dice score based on thresholding predictions to booleans"""
-    def __init__(self, from_logits=False, name='BooleanDiceScore', dtype=tf.float32):
+    def __init__(self, name='BooleanDiceScore', dtype=tf.float32):
         super(BooleanDiceScore, self).__init__(name=name, dtype=dtype)
-        self.from_logits = from_logits
         self.true_positive = self.add_weight('true_positives', initializer='zeros')
         self.false_positive = self.add_weight('false_positives', initializer='zeros')
         self.false_negative = self.add_weight('false_negatives', initializer='zeros')
 
     def update_state(self, labels, predictions, sample_weight=None):
-        if self.from_logits:
-            predictions = tf.nn.sigmoid(predictions)
         label_true = tf.math.greater_equal(tf.reshape(tf.cast(labels, self.dtype), [-1]), 0.5)
         pred_true = tf.math.greater_equal(tf.reshape(tf.cast(predictions, self.dtype), [-1]), 0.5)
 
