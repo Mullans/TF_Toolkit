@@ -31,18 +31,23 @@ def IOU_loss(**kwargs):
     return tf.function(loss)
 
 
-def dice_loss(as_scalar=True, reduction='sum_over_batch_size', **kwargs):
-    reduction_func = get_reduction(reduction)
+def dice_loss(as_scalar=True, reduction='sum_over_batch_size', batch_size=None, from_logits=False, **kwargs):
+    epsilon = tf.keras.backend.epsilon()
+    reduction_func = get_reduction(reduction, batch_size=batch_size)
     if as_scalar:
         def loss(y_true, y_pred):
-            numerator = 2 * tf.reduce_sum(tf.reshape(y_true * y_pred, [tf.shape(y_true)[0], -1]), axis=1)
-            denominator = tf.reduce_sum(tf.reshape(y_true + y_pred, [tf.shape(y_true)[0], -1]), axis=1)
+            if from_logits:
+                y_pred = tf.nn.sigmoid(y_pred)
+            numerator = 2 * tf.reduce_sum(tf.reshape(y_true * y_pred, [tf.shape(y_true)[0], -1]), axis=1) + epsilon
+            denominator = tf.reduce_sum(tf.reshape(y_true + y_pred, [tf.shape(y_true)[0], -1]), axis=1) + epsilon
             dice = 1 - numerator / denominator
             return reduction_func(dice)
     else:
         def loss(y_true, y_pred):
-            numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=-1)
-            denominator = tf.reduce_sum(y_true + y_pred, axis=-1)
+            if from_logits:
+                y_pred = tf.nn.sigmoid(y_pred)
+            numerator = 2 * tf.reduce_sum(y_true * y_pred, axis=-1) + epsilon
+            denominator = tf.reduce_sum(y_true + y_pred, axis=-1) + epsilon
             dice = 1 - (numerator + denominator) / (denominator + 1)
             return reduction_func(dice)
     return tf.function(loss)
@@ -76,29 +81,66 @@ def mixed_IOU_BCE_loss(beta=0.5, label_smoothing=0.1, reduction='auto', **kwargs
     return tf.function(loss)
 
 
-def focal_loss(beta=0.25, gamma=2, reduction='sum_over_batch_size', **kwargs):
+def focal_loss(gamma=2, foreground_class=1, from_logits=False, reduction='sum_over_batch_size', batch_size=None, **kwargs):
+    reduction_func = get_reduction(reduction, batch_size=batch_size)
+    epsilon = tf.keras.backend.epsilon()
+
+    def focal_loss(y_true, y_pred):
+        if from_logits:
+            y_pred = tf.nn.sigmoid(y_pred)
+        y_true = tf.reshape(y_true, [-1])
+        y_pred = tf.reshape(y_pred, [-1])
+        targets = tf.not_equal(y_true, foreground_class)
+        y_true = tf.boolean_mask(y_true, targets, axis=0)
+        y_true = tf.clip_by_value(y_true, epsilon, 1 - epsilon)
+        y_pred = tf.boolean_mask(y_pred, targets, axis=0)
+        y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+        p = (1 - y_true) * (1 - y_pred) + (y_true * y_pred)
+        loss = - tf.pow((1 - p), gamma) * tf.math.log(p)
+        loss = tf.reduce_mean(loss)
+        loss = reduction_func(loss)
+        if tf.math.is_nan(loss):  # temp fix - can't replicate why it becomes nan
+            return 0.
+        return loss
+    return focal_loss
+
+
+def weighted_focal_loss(beta=0.25, gamma=2, from_logits=False, reduction='auto', **kwargs):
     """https://arxiv.org/abs/1708.02002 - code adapted from https://lars76.github.io/neural-networks/object-detection/losses-for-segmentation/"""
     reduction_func = get_reduction(reduction)
+    epsilon = tf.keras.backend.epsilon()
 
-    def focal_loss_with_logits(logits, targets, beta, gamma, y_pred):
+    def focal_loss_with_logits(logits, targets, y_pred):
         weight_a = beta * (1 - y_pred) ** gamma * targets
         weight_b = (1 - beta) * y_pred ** gamma * (1 - targets)
 
         return (tf.math.log1p(tf.exp(-tf.abs(logits))) + tf.nn.relu(-logits)) * (weight_a + weight_b) + logits * weight_b
 
     def loss(y_true, y_pred):
-        y_pred = tf.clip_by_value(y_pred, tf.keras.backend.epsilon(), 1 - tf.keras.backend.epsilon())
-        logits = tf.math.log(y_pred / (1 - y_pred))
+        y_pred = tf.clip_by_value(y_pred, epsilon, 1 - epsilon)
+        logits = y_pred if from_logits else tf.math.log(y_pred / (1 - y_pred))
 
-        loss = focal_loss_with_logits(logits=logits, targets=y_true, beta=beta, gamma=gamma, y_pred=y_pred)
-
-        return reduction_func(loss)
+        loss = focal_loss_with_logits(logits=logits, targets=y_true, y_pred=y_pred)
+        loss = reduction_func(loss)
+        return 0. if tf.math.is_nan(loss) else loss
 
     return tf.function(loss)
 
 
-def binary_crossentropy(from_logits=False, label_smoothing=0, reduction='auto', **kwargs):
-    return tf.keras.losses.BinaryCrossentropy(from_logits=from_logits, label_smoothing=label_smoothing, reduction=reduction)
+# def binary_crossentropy(from_logits=False, label_smoothing=0, reduction='auto', **kwargs):
+#     return tf.keras.losses.BinaryCrossentropy(from_logits=from_logits, label_smoothing=label_smoothing, reduction=reduction)
+
+
+def binary_crossentropy(from_logits=False, label_smoothing=0, reduction='auto', batch_size=None, **kwargs):
+    """Similar to the keras loss, but always applies per-image mean reduction (easier for distributed)"""
+    reduction_func = get_reduction(reduction, batch_size=batch_size)
+
+    def loss(y_true, y_pred):
+        loss = tf.keras.metrics.binary_crossentropy(y_true, y_pred, from_logits=from_logits, label_smoothing=label_smoothing)
+        loss = tf.reshape(loss, [tf.shape(y_true)[0], -1])
+        loss = tf.reduce_mean(loss, axis=-1)
+        return reduction_func(loss)
+    return loss
 
 
 def categorical_crossentropy(from_logits=False, label_smoothing=0, reduction='auto', **kwargs):
@@ -154,6 +196,8 @@ def get_combined_losses(*losses, divide_by_total_weight=False, **loss_kwargs):
             total_loss += func(y_true, y_pred) * weight
         if divide_by_total_weight:
             total_loss /= total_weight
+        if tf.math.is_nan(total_loss):  # temp fix - can't replicate why it becomes nan
+            return 0.
         return total_loss
     return tf.function(loss_func)
 
@@ -190,6 +234,7 @@ def get_loss_func(loss_type, **kwargs):
         'iou': IOU_loss,
         'iou_bce': mixed_IOU_BCE_loss,
         'focal': focal_loss,
+        'weighted_focal': weighted_focal_loss,
         'dice': dice_loss,
         'tversky': tversky_loss,
         'weighted_ce': weighted_crossentropy

@@ -127,12 +127,22 @@ def dual_attention_block3Dv2(layer_input, ratio=16, name='sau_blockv2'):
     return Multiply(name=name + '/spatial_multiply')([channel_block, spatial_block])
 
 
-def deconv_layer(layer_input, filters, kernel=(3, 3), strides=(2, 2), padding='same', use_bias=True, batchnorm=True, activation=ReLU, name='deconv'):
-    conv = Conv2DTranspose(filters, kernel_size=kernel, strides=strides, padding=padding, use_bias=use_bias, name=name)(layer_input)
+def deconv_layer(layer_input, filters, kernel=(3, 3), strides=(2, 2), padding='same', use_bias=True, batchnorm=True, regularize=False, activation=ReLU, name='deconv'):
+    regularize_weight = 1e-4 if isinstance(regularize, bool) else regularize
+    conv = Conv2DTranspose(filters,
+                           kernel_size=kernel,
+                           strides=strides,
+                           padding=padding,
+                           use_bias=use_bias,
+                           kernel_regularizer=L2(regularize_weight) if regularize else None,
+                           name=name)(layer_input)
     if batchnorm:
         conv = BatchNormalization(name=name + '/bn')(conv)
     if activation is not None:
-        conv = activation(name=name + '/act')(conv)
+        if isinstance(activation, str):
+            conv = Activation(activation, name=name + '/act')(conv)
+        else:
+            conv = activation(name=name + '/act')(conv)
     return conv
 
 

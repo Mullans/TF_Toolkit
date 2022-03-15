@@ -119,7 +119,7 @@ def get_image_augmenter_lite(random_crop=[30, 30], flip_h=True, flip_v=True, aft
     return tf.function(augment_func)
 
 
-def tf_transform(images, transforms, interpolation='NEAREST', fill_mode='NEAREST', output_shape=None, name=None):
+def tf_transform(images, transforms, interpolation='NEAREST', fill_mode='REFLECT', output_shape=None, name=None):
     """Applies the given transform(s) to the image(s).
 
     Note: This is just a quick copy of

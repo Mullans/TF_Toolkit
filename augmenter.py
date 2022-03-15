@@ -147,6 +147,7 @@ def get_image_augmenter(
     contrast_range=(1.0, 1.0),
     noise_stddev=0.0,
     random_distribution=tf.random.uniform,
+    fill_mode='REFLECT',
     run_on_batch=True,
     label_as_map=True,
     as_tf_pyfunc=False,
@@ -180,6 +181,8 @@ def get_image_augmenter(
         The standard deviation of normal noise centered at 0.0 to add to the image (the default is 0.0)
     random_distribution: function
         The function for the random distribution to use for augmentation values (the default is numpy.random.uniform)
+    fill_mode : str
+        The method to fill background after the transform - can be NEAREST, CONSTANT, REFLECT (the default is REFLECT)
     run_on_batch: bool
         Whether the augment func will be called on batches (the default is True)
 
@@ -281,9 +284,9 @@ def get_image_augmenter(
         if affine_changed:
             transform = tf.cast(transform, tf.float32)
             transform = matrices_to_flat_transforms(transform, invert=True)
-            image = tf_transform(image, transform, interpolation='BILINEAR')
+            image = tf_transform(image, transform, interpolation='BILINEAR', fill_mode=fill_mode)
             if label is not None and label_as_map:
-                label = tf_transform(label, transform, interpolation='NEAREST')
+                label = tf_transform(label, transform, interpolation='NEAREST', fill_mode=fill_mode)
             if not run_on_batch:
                 image = image[0]
                 if label is not None and label.ndim > 1:

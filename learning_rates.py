@@ -18,7 +18,7 @@ def exponential_decay_lr(learning_rate=1e-4, decay_steps=None, decay_rate=None, 
         raise ValueError("Decay rate must be set for exponential decay learning rate")
 
     lr = tf.keras.optimizers.schedules.ExponentialDecay(
-        initial_rate=learning_rate,
+        initial_learning_rate=learning_rate,
         decay_steps=decay_steps,
         decay_rate=decay_rate
     )
