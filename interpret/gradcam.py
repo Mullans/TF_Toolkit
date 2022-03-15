@@ -2,25 +2,27 @@ from .gradients import simple_gradients, integrated_gradients
 import tensorflow as tf
 
 
-def GradCAM(model, input_image, layer_name, gradient_type='simple', resize_to_input=False, **gradient_kwargs):
+def GradCAM(model, input_image, layer_name, class_of_interest=0, gradient_type='simple', resize_to_input=False, **gradient_kwargs):
     # gradient_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(layer_name).output, model.output])
     # with tf.GradientTape() as tape:
     #     conv_output, predictions = gradient_model(input_image)
     # grads = tape.gradient(predictions, conv_output)
     if gradient_type == 'simple':
-        conv_output, grads, _ = simple_gradients(model, input_image, layer_name, **gradient_kwargs)
+        conv_output, grads, _ = simple_gradients(model, input_image, layer_name, class_of_interest=class_of_interest, **gradient_kwargs)
     elif gradient_type == 'integrated':
-        conv_output, grads, _ = integrated_gradients(model, input_image, layer_name, **gradient_kwargs)
+        conv_output, grads, _ = integrated_gradients(model, input_image, layer_name, class_of_interest=class_of_interest, **gradient_kwargs)
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
     heatmap = conv_output @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
     heatmap = tf.maximum(heatmap, 0) / tf.reduce_max(heatmap)
     if resize_to_input:
-        return tf.image.resize(heatmap, (input_image.shape[2], input_image.shape[1]))
+        if heatmap.ndim == 2:
+            heatmap = tf.expand_dims(heatmap, -1)
+        return tf.image.resize(heatmap, (input_image.shape[1], input_image.shape[2]))
     return heatmap
 
 
-def GradCAMPlus(model, input_image, layer_name, gradient_type='simple', resize_to_input=False, **gradient_kwargs):
+def GradCAMPlus(model, input_image, layer_name, gradient_type='simple', segmentation=False, resize_to_input=False, class_of_interest=0, **gradient_kwargs):
     """GradCAM++ algorithm for segmentations
 
     NOTE
@@ -36,12 +38,14 @@ def GradCAMPlus(model, input_image, layer_name, gradient_type='simple', resize_t
     #     conv_output, predictions = gradient_model(input_image)
     # grads = tape.gradient(predictions, conv_output)
     if gradient_type == 'simple':
-        conv_output, grads, predictions = simple_gradients(model, input_image, layer_name, **gradient_kwargs)
+        conv_output, grads, predictions = simple_gradients(model, input_image, layer_name, class_of_interest=class_of_interest, **gradient_kwargs)
     elif gradient_type == 'integrated':
-        conv_output, grads, predictions = integrated_gradients(model, input_image, layer_name, **gradient_kwargs)
+        conv_output, grads, predictions = integrated_gradients(model, input_image, layer_name, class_of_interest=class_of_interest, **gradient_kwargs)
     # This is only needed for segmentation
-    small_pred = tf.image.resize(predictions, grads.shape[1:3])
-
+    if segmentation:
+        small_pred = tf.image.resize(predictions, grads.shape[1:3])
+    else:
+        small_pred = predictions
     # small_pred should be class-specific score
     first_deriv = tf.exp(small_pred) * grads
     second_deriv = first_deriv * grads
@@ -64,5 +68,7 @@ def GradCAMPlus(model, input_image, layer_name, gradient_type='simple', resize_t
     heatmap = tf.squeeze(heatmap)
     heatmap = tf.maximum(heatmap, 0) / tf.reduce_max(heatmap)
     if resize_to_input:
-        return tf.image.resize(heatmap, (input_image.shape[2], input_image.shape[1]))
+        if heatmap.ndim == 2:
+            heatmap = tf.expand_dims(heatmap, -1)
+        return tf.image.resize(heatmap, (input_image.shape[1], input_image.shape[2]))
     return heatmap

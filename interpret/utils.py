@@ -4,7 +4,6 @@ import numpy as np
 from scipy import ndimage
 import skimage.transform
 import skimage.segmentation
-import tensorflow as tf
 
 
 def resize(image, output_shape, method='fast', anti_aliasing=False):
@@ -84,8 +83,10 @@ def get_felzenszwalb(image,
                      resize_image=True,
                      rescaled_size=(224, 224),
                      sigma_values=[0.8],
+                     scale_values=[50, 10, 150, 250, 500, 1200],
+                     min_segment_size=150,
                      rescale_range=[-1.0, 1.0],
-                     dilation_radius=5):
+                     dilation_radius=5, **kwargs):
     """Compute image segments based on Felzenszwalb's algorithm
 
     Parameters
@@ -105,12 +106,6 @@ def get_felzenszwalb(image,
     ----
     https://doi.org/10.1023/B:VISI.0000022288.19776.77
     """
-    parameters = {
-        # 'image_rescale': (224, 224),
-        'scale_values': [50, 10, 150, 250, 500, 1200],
-        'sigma_values': [0.8],
-        'min_segment_size': 150
-    }
 
     height, width = image.shape[:2]
     if resize_image:
@@ -119,9 +114,9 @@ def get_felzenszwalb(image,
         image = normalize_image(image, rescale_range)
 
     segments = []
-    for scale in parameters['scale_values']:
-        for sigma in parameters['sigma_values']:
-            segment = skimage.segmentation.felzenszwalb(image, scale=scale, sigma=sigma, min_size=parameters['min_segment_size'])
+    for scale in scale_values:
+        for sigma in sigma_values:
+            segment = skimage.segmentation.felzenszwalb(image, scale=scale, sigma=sigma, min_size=min_segment_size)
             segment = segment.astype(np.uint8)  # required for cv2.resize
             if resize_image:
                 segment = resize(segment, (height, width), method='auto')
@@ -132,7 +127,7 @@ def get_felzenszwalb(image,
             masks.append(segment == value)
     if dilation_radius:
         selem = skimage.morphology.disk(dilation_radius)
-        masks = [skimage.morphology.dilation(mask, selem=selem) for mask in masks]
+        masks = [skimage.morphology.binary_dilation(mask, selem=selem) for mask in masks]
     return masks
 
 
@@ -163,6 +158,7 @@ def gaussian_blur(image, sigma):
 
 
 def tf_rescale(image, keep_sign=False):
+    import tensorflow as tf
     if keep_sign:
         sign = tf.sign(image)
         image = tf.abs(image)

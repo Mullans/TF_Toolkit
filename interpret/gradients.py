@@ -3,12 +3,14 @@ import tensorflow as tf
 from ..utils import enforce_4D, rescale
 
 
-def simple_gradients(model, input_image, layer_name, logit_layer_name=None, **kwargs):
+def simple_gradients(model, input_image, layer_name, class_of_interest=None, logit_layer_name=None, **kwargs):
     logits = model.output if logit_layer_name is None else model.get_layer(logit_layer_name)
 
     gradient_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(layer_name).output, logits])
     with tf.GradientTape() as tape:
         conv_output, predictions = gradient_model(input_image)
+        if class_of_interest is not None:
+            predictions = predictions[..., class_of_interest]
     grads = tape.gradient(predictions, conv_output)
     return conv_output, grads, predictions
 
