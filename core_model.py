@@ -147,7 +147,7 @@ class CoreModel(object):
 
         self.model = model_func(**self.model_args)
 
-    def load_weights(self, group_name=None, model_name=None, version=None, path=None, **kwargs):
+    def load_weights(self, group_name=None, model_name=None, version=None, path=None, dryrun=False, **kwargs):
         """Load weights from an existing trained model.
 
         Paramters
@@ -161,6 +161,8 @@ class CoreModel(object):
         path : None | str
             The full path to the model weights to load. Path takes priority over
             version if both are present.
+        dryrun : bool
+            If true, determine the weights path and return it without actually loading them (the default is False)
 
         Note
         ----
@@ -192,6 +194,8 @@ class CoreModel(object):
             path = str(path)
         if path.endswith('.index'):
             path = path.replace('.index', '')
+        if dryrun:
+            return path
         self.model.load_weights(path, **kwargs)
 
     def list_versions(self):
@@ -311,9 +315,9 @@ class CoreModel(object):
               sample_callback=None,
               version='default',
               **kwargs):
-        log_dir = gouda.ensure_dir(self.model_dir(version))
+        log_dir = gouda.GoudaPath(gouda.ensure_dir(self.model_dir(version)))
         args_path = log_dir('training_args.json')
-        weights_dir = gouda.ensure_dir(log_dir('training_weights'))
+        weights_dir = gouda.GoudaPath(gouda.ensure_dir(log_dir('training_weights')))
 
         if logging_handler is None:
             logging_handler = EmptyLoggingHandler()
